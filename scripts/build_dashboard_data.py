@@ -1,0 +1,616 @@
+from __future__ import annotations
+
+import json
+import math
+import os
+from collections import defaultdict
+from datetime import date, datetime
+from pathlib import Path
+from typing import Any
+
+import pandas as pd
+
+
+WORKSPACE = Path(__file__).resolve().parents[1]
+SOURCE_DIR = Path(
+    os.environ.get(
+        "SOURCE_DIR",
+        "/Users/luffy/Desktop/Project/A_即时零售交付新路线探索/嘉士伯周报数据源",
+    )
+)
+OUTPUT_JSON = Path(
+    os.environ.get("OUTPUT_JSON", WORKSPACE / "app" / "data" / "dashboard-data.json")
+)
+LOGIC_DOC = Path(os.environ.get("LOGIC_DOC", WORKSPACE / "docs" / "取数逻辑说明.md"))
+
+
+PERIODS = [
+    {
+        "id": "0525-0531",
+        "label": "WTD 5.25-5.31",
+        "shortLabel": "5.25-5.31",
+        "kind": "previous",
+        "start": "2026-05-25",
+        "end": "2026-05-31",
+        "monthKey": 202605,
+        "monthLabel": "2026年5月",
+    },
+    {
+        "id": "0601-0607",
+        "label": "WTD 6.1-6.7",
+        "shortLabel": "6.1-6.7",
+        "kind": "current",
+        "start": "2026-06-01",
+        "end": "2026-06-07",
+        "monthKey": 202606,
+        "monthLabel": "2026年6月",
+    },
+    {
+        "id": "25年0601-0607",
+        "label": "去年同期 6.1-6.7",
+        "shortLabel": "2025 6.1-6.7",
+        "kind": "last_year",
+        "start": "2025-06-01",
+        "end": "2025-06-07",
+        "monthKey": 202506,
+        "monthLabel": "2025年6月",
+    },
+]
+
+PLATFORMS = {
+    "taobao": {
+        "label": "淘宝闪购",
+        "sourcePlatform": "饿了么",
+        "fullSuffix": "全量数据明细-淘宝闪购.csv",
+        "billSuffix": "账单数据明细-淘宝闪购.csv",
+        "gmvColumn": "销售额",
+        "quantityColumn": "销量",
+        "ordersColumn": "订单量",
+        "usersColumn": "下单用户数",
+        "billActivityColumn": "商品原价总额",
+        "billSubsidyColumn": "品牌补贴总额",
+        "billOrderColumn": "饿了么订单号",
+    },
+    "jd": {
+        "label": "京东秒送",
+        "sourcePlatform": "京东到家",
+        "fullSuffix": "全量数据明细-京东到家.csv",
+        "billSuffix": "账单数据明细-京东到家.csv",
+        "gmvColumn": "gmv（元）",
+        "quantityColumn": "商品销量（件）",
+        "ordersColumn": "订单编号",
+        "usersColumn": None,
+        "billActivityColumn": "商品gov",
+        "billSubsidyColumn": "品牌计费金额-含税",
+        "billOrderColumn": "营销订单id",
+    },
+}
+
+REGION_PARENT = {
+    "CBC-CQ": "CBC",
+    "CBC-SC": "CBC",
+    "CIB东南": "CIB",
+    "CIB华北": "CIB",
+    "CIB华南": "CIB",
+    "CIB苏皖": "CIB",
+    "NX": "NX",
+    "XJ": "XJ",
+    "YN": "YN",
+    "华中-湖南": "华中",
+    "华中-非湖南": "华中",
+    "未识别": "未识别",
+}
+
+REGION_ORDER = [
+    "CBC-CQ",
+    "CBC-SC",
+    "CIB东南",
+    "CIB华北",
+    "CIB华南",
+    "CIB苏皖",
+    "NX",
+    "XJ",
+    "YN",
+    "华中-湖南",
+    "华中-非湖南",
+    "未识别",
+]
+
+
+def clean_number(value: Any) -> float:
+    if value is None or (isinstance(value, float) and math.isnan(value)):
+        return 0.0
+    if isinstance(value, str):
+        value = value.replace(",", "").replace("%", "").strip()
+        if value in {"", "-", "*****"}:
+            return 0.0
+    return float(pd.to_numeric(value, errors="coerce") or 0.0)
+
+
+def safe_div(numerator: float, denominator: float) -> float | None:
+    if not denominator:
+        return None
+    return numerator / denominator
+
+
+def round_float(value: Any, digits: int = 4) -> float | None:
+    if value is None:
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    if math.isnan(number) or math.isinf(number):
+        return None
+    return round(number, digits)
+
+
+def read_csv(path: Path) -> pd.DataFrame:
+    df = pd.read_csv(path, encoding="utf-8-sig", low_memory=False)
+    for col in ["清洗_大区", "清洗_渠道", "清洗_品牌", "清洗_商户", "清洗_商品名"]:
+        if col in df.columns:
+            df[col] = df[col].fillna("未识别").astype(str).str.strip().replace("", "未识别")
+    return df
+
+
+def source_file(period_id: str, suffix: str) -> Path:
+    path = SOURCE_DIR / f"{period_id}嘉士伯周报{suffix}"
+    if not path.exists():
+        raise FileNotFoundError(f"Missing source file: {path}")
+    return path
+
+
+def load_targets() -> tuple[dict[tuple[str, int], dict[str, float]], dict[tuple[str, int, str], dict[str, float]]]:
+    target_df = pd.read_excel(SOURCE_DIR / "目标GMV.xlsx")
+    budget_df = pd.read_excel(SOURCE_DIR / "分BU预算金额.xlsx")
+
+    platform_targets: dict[tuple[str, int], dict[str, float]] = {}
+    for _, row in target_df.iterrows():
+        key = (str(row["平台"]).strip(), int(row["年月"]))
+        platform_targets[key] = {
+            "targetGmv": clean_number(row.get("本年目标gmv")),
+            "lastYearTargetGmv": clean_number(row.get("24年目标gmv")),
+            "actualTmFeeRatio": clean_number(row.get("本年实际tm费比")),
+            "lastYearTmFeeRatio": clean_number(row.get("上年实际tm费比")),
+            "targetPromoFeeRatio": clean_number(row.get("目标促销费比")),
+        }
+
+    bu_budget: dict[tuple[str, int, str], dict[str, float]] = {}
+    for _, row in budget_df.iterrows():
+        key = (str(row["平台"]).strip(), int(row["年月"]), str(row["bu区域"]).strip())
+        bu_budget[key] = {
+            "budget": clean_number(row.get("预算")),
+            "buTarget": clean_number(row.get("目标")),
+            "supportBudget": clean_number(row.get("加持目标预算")),
+        }
+
+    return platform_targets, bu_budget
+
+
+def month_days(period: dict[str, Any]) -> tuple[int, int, float]:
+    start = datetime.fromisoformat(period["start"]).date()
+    end = datetime.fromisoformat(period["end"]).date()
+    elapsed = (end - date(end.year, end.month, 1)).days + 1
+    next_month = date(end.year + (end.month == 12), 1 if end.month == 12 else end.month + 1, 1)
+    days_in_month = (next_month - date(end.year, end.month, 1)).days
+    return elapsed, days_in_month, elapsed / days_in_month
+
+
+def summarize_full(
+    df: pd.DataFrame,
+    platform: dict[str, Any],
+    group_cols: list[str],
+) -> pd.DataFrame:
+    gmv_col = platform["gmvColumn"]
+    df = df.copy()
+    df[gmv_col] = pd.to_numeric(df[gmv_col], errors="coerce").fillna(0)
+    aggregations: dict[str, tuple[str, str]] = {"gmv": (gmv_col, "sum")}
+
+    quantity_col = platform.get("quantityColumn")
+    if quantity_col and quantity_col in df.columns:
+        df[quantity_col] = pd.to_numeric(df[quantity_col], errors="coerce").fillna(0)
+        aggregations["quantity"] = (quantity_col, "sum")
+
+    orders_col = platform.get("ordersColumn")
+    if orders_col and orders_col in df.columns:
+        if platform["label"] == "淘宝闪购":
+            df[orders_col] = pd.to_numeric(df[orders_col], errors="coerce").fillna(0)
+            aggregations["orders"] = (orders_col, "sum")
+        else:
+            aggregations["orders"] = (orders_col, "nunique")
+
+    users_col = platform.get("usersColumn")
+    if users_col and users_col in df.columns:
+        df[users_col] = pd.to_numeric(df[users_col], errors="coerce").fillna(0)
+        aggregations["users"] = (users_col, "sum")
+
+    return df.groupby(group_cols, dropna=False).agg(**aggregations).reset_index()
+
+
+def summarize_bill(
+    df: pd.DataFrame,
+    platform: dict[str, Any],
+    group_cols: list[str],
+) -> pd.DataFrame:
+    activity_col = platform["billActivityColumn"]
+    subsidy_col = platform["billSubsidyColumn"]
+    df = df.copy()
+    df[activity_col] = pd.to_numeric(df[activity_col], errors="coerce").fillna(0)
+    df[subsidy_col] = pd.to_numeric(df[subsidy_col], errors="coerce").fillna(0)
+    aggregations: dict[str, tuple[str, str]] = {
+        "activityGmv": (activity_col, "sum"),
+        "subsidy": (subsidy_col, "sum"),
+    }
+    order_col = platform.get("billOrderColumn")
+    if order_col and order_col in df.columns:
+        aggregations["activityOrders"] = (order_col, "nunique")
+    return df.groupby(group_cols, dropna=False).agg(**aggregations).reset_index()
+
+
+def merge_metric_frames(
+    full_summary: pd.DataFrame,
+    bill_summary: pd.DataFrame,
+    group_cols: list[str],
+) -> pd.DataFrame:
+    merged = full_summary.merge(bill_summary, on=group_cols, how="outer")
+    for col in ["gmv", "quantity", "orders", "users", "activityGmv", "subsidy", "activityOrders"]:
+        if col not in merged.columns:
+            merged[col] = 0
+        merged[col] = pd.to_numeric(merged[col], errors="coerce").fillna(0)
+    return merged
+
+
+def enrich_record(base: dict[str, Any]) -> dict[str, Any]:
+    gmv = base.get("gmv", 0.0) or 0.0
+    activity = base.get("activityGmv", 0.0) or 0.0
+    subsidy = base.get("subsidy", 0.0) or 0.0
+    budget = base.get("budget", 0.0) or 0.0
+    target = base.get("buTarget", 0.0) or 0.0
+    time_progress = base.get("timeProgress", 0.0) or 0.0
+
+    base["activityShare"] = round_float(safe_div(activity, gmv))
+    base["promoFeeRatio"] = round_float(safe_div(subsidy, gmv))
+    base["activityDiscount"] = round_float(1 - subsidy / activity if activity else None)
+    base["targetAchievement"] = round_float(safe_div(gmv, target))
+    base["paceAchievement"] = round_float(safe_div(safe_div(gmv, target) or 0, time_progress))
+    base["budgetUsage"] = round_float(safe_div(subsidy, budget))
+    base["budgetRemaining"] = round_float(budget - subsidy, 2) if budget else None
+
+    for key in [
+        "gmv",
+        "quantity",
+        "orders",
+        "users",
+        "activityGmv",
+        "subsidy",
+        "budget",
+        "buTarget",
+        "supportBudget",
+        "targetGmv",
+        "lastYearTargetGmv",
+        "actualTmFeeRatio",
+        "lastYearTmFeeRatio",
+        "targetPromoFeeRatio",
+    ]:
+        if key in base:
+            base[key] = round_float(base[key], 2)
+    return base
+
+
+def add_comparisons(records: list[dict[str, Any]]) -> None:
+    by_key = {(r["platformId"], r["region"], r["periodId"]): r for r in records}
+    for record in records:
+        if record["periodKind"] != "current":
+            record["wowGmvChange"] = None
+            record["yoyGmvChange"] = None
+            record["promoFeeRatioChange"] = None
+            continue
+        previous = by_key.get((record["platformId"], record["region"], "0525-0531"))
+        last_year = by_key.get((record["platformId"], record["region"], "25年0601-0607"))
+        record["wowGmvChange"] = round_float(
+            safe_div(record["gmv"] - previous["gmv"], previous["gmv"]) if previous else None
+        )
+        record["yoyGmvChange"] = round_float(
+            safe_div(record["gmv"] - last_year["gmv"], last_year["gmv"]) if last_year else None
+        )
+        current_ratio = record.get("promoFeeRatio")
+        previous_ratio = previous.get("promoFeeRatio") if previous else None
+        record["promoFeeRatioChange"] = round_float(
+            current_ratio - previous_ratio
+            if current_ratio is not None and previous_ratio is not None
+            else None
+        )
+
+
+def build_breakdown(
+    full_df: pd.DataFrame,
+    bill_df: pd.DataFrame,
+    platform: dict[str, Any],
+    period: dict[str, Any],
+    platform_id: str,
+    dimension_col: str,
+    dimension_key: str,
+    top_n_per_region: int | None = None,
+) -> list[dict[str, Any]]:
+    group_cols = ["清洗_大区", dimension_col]
+    full = summarize_full(full_df, platform, group_cols)
+    bill = summarize_bill(bill_df, platform, group_cols)
+    merged = merge_metric_frames(full, bill, group_cols)
+    merged = merged.rename(columns={"清洗_大区": "region", dimension_col: dimension_key})
+
+    rows: list[dict[str, Any]] = []
+    for _, row in merged.iterrows():
+        region = str(row["region"])
+        if region not in REGION_PARENT:
+            continue
+        rows.append(
+            enrich_record(
+                {
+                    "platformId": platform_id,
+                    "platformLabel": platform["label"],
+                    "periodId": period["id"],
+                    "periodLabel": period["label"],
+                    "periodKind": period["kind"],
+                    "region": region,
+                    "parent": REGION_PARENT[region],
+                    dimension_key: str(row[dimension_key]),
+                    "gmv": clean_number(row.get("gmv")),
+                    "quantity": clean_number(row.get("quantity")),
+                    "orders": clean_number(row.get("orders")),
+                    "users": clean_number(row.get("users")),
+                    "activityGmv": clean_number(row.get("activityGmv")),
+                    "subsidy": clean_number(row.get("subsidy")),
+                    "activityOrders": clean_number(row.get("activityOrders")),
+                }
+            )
+        )
+
+    if top_n_per_region:
+        limited: list[dict[str, Any]] = []
+        buckets: dict[tuple[str, str, str], list[dict[str, Any]]] = defaultdict(list)
+        for row in rows:
+            buckets[(row["platformId"], row["periodId"], row["region"])].append(row)
+        for bucket_rows in buckets.values():
+            limited.extend(sorted(bucket_rows, key=lambda item: item["gmv"], reverse=True)[:top_n_per_region])
+        return limited
+    return rows
+
+
+def aggregate_platform_reconciliation(
+    records: list[dict[str, Any]],
+    period: dict[str, Any],
+    platform_id: str,
+    platform: dict[str, Any],
+    full_df: pd.DataFrame,
+    bill_df: pd.DataFrame,
+) -> dict[str, Any]:
+    record_total = sum(
+        row["gmv"]
+        for row in records
+        if row["periodId"] == period["id"] and row["platformId"] == platform_id
+    )
+    full_total = clean_number(pd.to_numeric(full_df[platform["gmvColumn"]], errors="coerce").sum())
+    activity_total = clean_number(pd.to_numeric(bill_df[platform["billActivityColumn"]], errors="coerce").sum())
+    subsidy_total = clean_number(pd.to_numeric(bill_df[platform["billSubsidyColumn"]], errors="coerce").sum())
+    return {
+        "platformId": platform_id,
+        "platformLabel": platform["label"],
+        "periodId": period["id"],
+        "fullGmvFromSource": round_float(full_total, 2),
+        "fullGmvFromRegionSum": round_float(record_total, 2),
+        "activityGmvFromBill": round_float(activity_total, 2),
+        "subsidyFromBill": round_float(subsidy_total, 2),
+        "gmvDiff": round_float(record_total - full_total, 2),
+    }
+
+
+def build_data() -> dict[str, Any]:
+    platform_targets, bu_budget = load_targets()
+    periods = []
+    for period in PERIODS:
+        elapsed, days_in_month, progress = month_days(period)
+        periods.append(
+            {
+                **period,
+                "elapsedDaysInMonth": elapsed,
+                "daysInMonth": days_in_month,
+                "timeProgress": round_float(progress),
+            }
+        )
+
+    records: list[dict[str, Any]] = []
+    channels: list[dict[str, Any]] = []
+    brands: list[dict[str, Any]] = []
+    merchants: list[dict[str, Any]] = []
+    products: list[dict[str, Any]] = []
+    reconciliation: list[dict[str, Any]] = []
+
+    for period in periods:
+        for platform_id, platform in PLATFORMS.items():
+            full_path = source_file(period["id"], platform["fullSuffix"])
+            bill_path = source_file(period["id"], platform["billSuffix"])
+            full_df = read_csv(full_path)
+            bill_df = read_csv(bill_path)
+
+            full_region = summarize_full(full_df, platform, ["清洗_大区"])
+            bill_region = summarize_bill(bill_df, platform, ["清洗_大区"])
+            region_summary = merge_metric_frames(full_region, bill_region, ["清洗_大区"])
+
+            target_key = (platform["sourcePlatform"], period["monthKey"])
+            platform_target = platform_targets.get(target_key, {})
+            if period["kind"] == "last_year":
+                current_target_key = (platform["sourcePlatform"], 202606)
+                platform_target = platform_targets.get(current_target_key, platform_target)
+
+            for _, row in region_summary.iterrows():
+                region = str(row["清洗_大区"])
+                if region not in REGION_PARENT:
+                    continue
+                budget_key = (platform["sourcePlatform"], period["monthKey"], region)
+                budget = bu_budget.get(budget_key, {})
+                record = {
+                    "platformId": platform_id,
+                    "platformLabel": platform["label"],
+                    "sourcePlatform": platform["sourcePlatform"],
+                    "periodId": period["id"],
+                    "periodLabel": period["label"],
+                    "periodKind": period["kind"],
+                    "monthKey": period["monthKey"],
+                    "monthLabel": period["monthLabel"],
+                    "timeProgress": period["timeProgress"],
+                    "region": region,
+                    "parent": REGION_PARENT[region],
+                    "gmv": clean_number(row.get("gmv")),
+                    "quantity": clean_number(row.get("quantity")),
+                    "orders": clean_number(row.get("orders")),
+                    "users": clean_number(row.get("users")),
+                    "activityGmv": clean_number(row.get("activityGmv")),
+                    "subsidy": clean_number(row.get("subsidy")),
+                    "activityOrders": clean_number(row.get("activityOrders")),
+                    "budget": clean_number(budget.get("budget")),
+                    "buTarget": clean_number(budget.get("buTarget")),
+                    "supportBudget": clean_number(budget.get("supportBudget")),
+                    "targetGmv": clean_number(platform_target.get("targetGmv")),
+                    "lastYearTargetGmv": clean_number(platform_target.get("lastYearTargetGmv")),
+                    "actualTmFeeRatio": clean_number(platform_target.get("actualTmFeeRatio")),
+                    "lastYearTmFeeRatio": clean_number(platform_target.get("lastYearTmFeeRatio")),
+                    "targetPromoFeeRatio": clean_number(platform_target.get("targetPromoFeeRatio")),
+                }
+                records.append(enrich_record(record))
+
+            channels.extend(
+                build_breakdown(full_df, bill_df, platform, period, platform_id, "清洗_渠道", "channel")
+            )
+            brands.extend(
+                build_breakdown(full_df, bill_df, platform, period, platform_id, "清洗_品牌", "brand")
+            )
+            merchants.extend(
+                build_breakdown(
+                    full_df, bill_df, platform, period, platform_id, "清洗_商户", "merchant", top_n_per_region=18
+                )
+            )
+            products.extend(
+                build_breakdown(
+                    full_df, bill_df, platform, period, platform_id, "清洗_商品名", "product", top_n_per_region=18
+                )
+            )
+            reconciliation.append(
+                aggregate_platform_reconciliation(records, period, platform_id, platform, full_df, bill_df)
+            )
+
+    add_comparisons(records)
+
+    return {
+        "metadata": {
+            "title": "嘉士伯淘京周报数据看板",
+            "generatedAt": datetime.now().isoformat(timespec="seconds"),
+            "sourceRoot": str(SOURCE_DIR),
+            "currentPeriodId": "0601-0607",
+            "previousPeriodId": "0525-0531",
+            "lastYearPeriodId": "25年0601-0607",
+            "periods": periods,
+            "platforms": [
+                {"id": platform_id, **platform}
+                for platform_id, platform in PLATFORMS.items()
+            ],
+            "regionOrder": REGION_ORDER,
+            "regionParent": REGION_PARENT,
+            "regionGroups": {
+                "CBC": ["CBC-CQ", "CBC-SC"],
+                "CIB": ["CIB东南", "CIB华北", "CIB华南", "CIB苏皖"],
+                "华中": ["华中-湖南", "华中-非湖南"],
+                "NX": ["NX"],
+                "XJ": ["XJ"],
+                "YN": ["YN"],
+                "未识别": ["未识别"],
+            },
+        },
+        "records": records,
+        "breakdowns": {
+            "channels": channels,
+            "brands": brands,
+            "merchants": merchants,
+            "products": products,
+        },
+        "reconciliation": reconciliation,
+    }
+
+
+def write_logic_doc(data: dict[str, Any]) -> None:
+    md = f"""# 嘉士伯淘京周报网页看板取数逻辑
+
+生成时间：{data["metadata"]["generatedAt"]}
+
+## 数据源
+
+- 源目录：`{SOURCE_DIR}`
+- 周期：`0525-0531`、`0601-0607`、`25年0601-0607`
+- 平台映射：前端展示 `淘宝闪购` 对应目标/预算表中的 `饿了么`；前端展示 `京东秒送` 对应目标/预算表中的 `京东到家`。
+- 区域字段：所有源表统一使用 `清洗_大区` 做区域匹配，使用脚本内置层级聚合为 `CBC`、`CIB`、`华中`、`NX`、`XJ`、`YN`。清洗后仍为空的记录保留在 `未识别`，不并入正式 BU。
+
+## 核心指标口径
+
+| 指标 | 淘宝闪购 | 京东秒送 |
+|---|---|---|
+| 全量 GMV | 全量数据明细 `销售额` 汇总 | 全量数据明细 `gmv（元）` 汇总 |
+| 活动 GMV | 账单数据明细 `商品原价总额` 汇总 | 账单数据明细 `商品gov` 汇总 |
+| 促销费 | 账单数据明细 `品牌补贴总额` 汇总 | 账单数据明细 `品牌计费金额-含税` 汇总 |
+| 促销费比 | `促销费 / 全量 GMV` | `促销费 / 全量 GMV` |
+| 活动 GMV 占比 | `活动 GMV / 全量 GMV` | `活动 GMV / 全量 GMV` |
+| 活动折扣率 | `1 - 促销费 / 活动 GMV` | `1 - 促销费 / 活动 GMV` |
+| 目标 GMV | `目标GMV.xlsx` 按平台+年月匹配 | `目标GMV.xlsx` 按平台+年月匹配 |
+| BU 目标与预算 | `分BU预算金额.xlsx` 按平台+年月+区域匹配 | `分BU预算金额.xlsx` 按平台+年月+区域匹配 |
+
+## 对比逻辑
+
+- 周环比：当前周期 `0601-0607` 对比上一周期 `0525-0531`。
+- 同比：当前周期 `0601-0607` 对比去年同期 `25年0601-0607`。
+- 月度目标达成率：`周期全量 GMV / 当月 BU 目标`。
+- 进度校正达成：`目标达成率 / 当月已过天数比例`。例如 6.1-6.7 使用 `7 / 30`。
+- 预算使用率：`促销费 / BU 预算`。
+
+## 下钻数据
+
+网页下钻按同一套区域筛选同时更新：
+
+- 区域明细：11 个正式叶子区域 + `未识别` 兜底区域，可点击切换。
+- BU 聚合：CBC、CIB、华中按子区域求和；NX、XJ、YN 为独立区域。
+- 渠道下钻：全量表按 `清洗_渠道` 统计 GMV，账单表按同字段补充活动 GMV 和促销费。
+- 品牌下钻：按 `清洗_品牌` 聚合。
+- 商户与商品下钻：每个平台、周期、区域保留 GMV Top 18，用于页面明细查看。
+
+## 校验
+
+脚本会在 `dashboard-data.json` 中写入 `reconciliation`，校验每个平台每个周期：
+
+- 区域汇总 GMV 是否等于全量源表 GMV。
+- 活动 GMV 与促销费是否来自账单源表合计。
+
+截至本次生成，所有平台/周期的区域汇总 GMV 与全量源表 GMV 差异应为 0 或仅有四舍五入误差。
+"""
+    LOGIC_DOC.parent.mkdir(parents=True, exist_ok=True)
+    LOGIC_DOC.write_text(md, encoding="utf-8")
+
+
+def main() -> None:
+    data = build_data()
+    OUTPUT_JSON.parent.mkdir(parents=True, exist_ok=True)
+    OUTPUT_JSON.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    write_logic_doc(data)
+    print(f"Wrote {OUTPUT_JSON}")
+    print(f"Wrote {LOGIC_DOC}")
+    for item in data["reconciliation"]:
+        print(
+            item["platformLabel"],
+            item["periodId"],
+            "source",
+            item["fullGmvFromSource"],
+            "region_sum",
+            item["fullGmvFromRegionSum"],
+            "diff",
+            item["gmvDiff"],
+        )
+
+
+if __name__ == "__main__":
+    main()

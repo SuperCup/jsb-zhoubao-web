@@ -701,9 +701,11 @@ function promoRatioChange(current: Aggregate, baseline: Aggregate): number | nul
   return current.promoFeeRatio - baseline.promoFeeRatio;
 }
 
+type BreakdownKey = "channel" | "brand" | "merchant" | "product";
+
 function collectBreakdown(
   rows: BreakdownRow[],
-  key: "channel" | "brand",
+  key: BreakdownKey,
   periodId: string,
   selectedPlatforms: Set<string>,
   selectedLeaves: Set<string>,
@@ -773,6 +775,7 @@ function buildNarrative({
   regionDrivers,
   channels,
   brands,
+  merchants,
 }: {
   current: Aggregate;
   previous: Aggregate;
@@ -781,6 +784,7 @@ function buildNarrative({
   regionDrivers: Array<{ node: string; current: Aggregate; previous: Aggregate }>;
   channels: Array<{ name: string } & Aggregate>;
   brands: Array<{ name: string } & Aggregate>;
+  merchants: Array<{ name: string } & Aggregate>;
 }) {
   const wow = compareAggregate(current, previous);
   const yoy = compareAggregate(current, lastYear);
@@ -795,38 +799,69 @@ function buildNarrative({
     .sort((a, b) => b.inc - a.inc)[0];
   const topChannel = channels[0];
   const topBrand = brands[0];
+  const topBrandsShare = brands
+    .slice(0, 4)
+    .reduce((sum, item) => sum + (safeRatio(item.gmv, current.gmv) ?? 0), 0);
+  const longTailBrand = brands
+    .slice(4)
+    .filter((item) => item.gmv > current.gmv * 0.01)
+    .sort((a, b) => b.gmv - a.gmv)[0];
+  const flagshipMerchants = merchants.filter((item) => /旗|官方|自营|酒小二/.test(item.name));
+  const flagshipGmv = flagshipMerchants.reduce((sum, item) => sum + item.gmv, 0);
+  const flagshipShare = safeRatio(flagshipGmv, current.gmv);
+  const flagshipTargetGap = flagshipShare === null ? null : 0.3 - flagshipShare;
   const highFeeChannel = channels
     .filter((item) => item.gmv > current.gmv * 0.03 && item.promoFeeRatio !== null)
     .sort((a, b) => (b.promoFeeRatio ?? 0) - (a.promoFeeRatio ?? 0))[0];
+  const highActivityChannel = channels
+    .filter((item) => item.gmv > current.gmv * 0.03 && item.activityShare !== null)
+    .sort((a, b) => (b.activityShare ?? 0) - (a.activityShare ?? 0))[0];
+  const feeRisk =
+    current.targetPromoFeeRatio !== null && current.promoFeeRatio !== null
+      ? current.promoFeeRatio - current.targetPromoFeeRatio
+      : null;
+  const activityDependence = current.activityShare ?? null;
+  const activityRiskLevel =
+    activityDependence === null ? "unknown" : activityDependence >= 0.7 ? "high" : activityDependence >= 0.6 ? "watch" : "normal";
+  const feeRiskTarget =
+    highFeeChannel?.name ?? (regionLabel === "全国/全区域" ? "高费比BU/系统" : regionLabel);
+  const activityRiskTarget = highActivityChannel?.name ?? topChannel?.name ?? "活动渠道";
 
   const conclusions = [
     `${regionLabel}本周全量GMV ${formatMoney(current.gmv)}，环比${formatDelta(wow)}，同比${formatDelta(yoy)}。`,
     `GMV目标达成率 ${formatPercent(current.targetAchievement)}，当月时间进度 ${formatPercent(current.timeProgress)}，当前节奏${targetGap >= 0 ? "领先" : "落后"} ${formatPointDelta(Math.abs(targetGap))}。`,
-    `实际促销费比 ${formatPercent(current.promoFeeRatio)}，促销预算使用率 ${formatPercent(current.promoBudgetUsage)}，预算消耗${budgetPressure > 0 ? "快于" : "慢于"}时间进度 ${formatPointDelta(Math.abs(budgetPressure))}。`,
+    `实际促销费比 ${formatPercent(current.promoFeeRatio)}，${feeRisk !== null ? `${feeRisk >= 0 ? "高于" : "低于"}目标 ${formatPointDistance(feeRisk)}` : "目标费比缺失"}；活动GMV占比 ${formatPercent(current.activityShare)}，${activityRiskLevel === "high" ? "促销依赖偏高" : activityRiskLevel === "watch" ? "需观察自然增长承接" : "活动依赖相对可控"}。`,
+    `促销预算使用率 ${formatPercent(current.promoBudgetUsage)}，预算消耗${budgetPressure > 0 ? "快于" : "慢于"}时间进度 ${formatPointDistance(budgetPressure)}，需结合BU/系统判断是否追加区域预算。`,
   ];
 
   const analysis = [
     topDriver
-      ? `${topDriver.node}是本周主要增量来源，较上周增加 ${formatMoney(topDriver.inc)}，需要优先复盘该区域渠道和活动组合。`
-      : `本周区域增量来源不集中，需要继续观察各区域拆分表现。`,
+      ? `${topDriver.node}是本周主要增量来源，较上周增加 ${formatMoney(topDriver.inc)}；若大盘费比异常，应先下钻该BU/系统，再看渠道、品牌和活动机制。`
+      : `本周区域增量来源不集中，费比监控需从大盘切到各BU/系统，避免单一区域或系统费用失控被总盘掩盖。`,
     topChannel && topBrand
-      ? `渠道侧以${topChannel.name}贡献最高，全量GMV ${formatMoney(topChannel.gmv)}；品牌侧以${topBrand.name}贡献最高，全量GMV ${formatMoney(topBrand.gmv)}。`
-      : `渠道和品牌结构数据不足以形成明确主贡献判断。`,
+      ? `渠道侧${topChannel.name}贡献最高，全量GMV ${formatMoney(topChannel.gmv)}；品牌侧${topBrand.name}贡献最高，Top4品牌GMV占比 ${formatPercent(topBrandsShare)}，需持续观察中腰部/长尾品牌是否侵蚀头部份额。`
+      : `渠道和品牌结构数据不足以形成明确主贡献判断，建议补充竞品活动机制、IP合作和流量置换信息。`,
     highFeeChannel
-      ? `${highFeeChannel.name}促销费比达到 ${formatPercent(highFeeChannel.promoFeeRatio)}，若继续放量，需要同步检查ROI和活动折扣率。`
-      : `当前高费比渠道没有明显异常，促销效率风险主要来自预算节奏。`,
+      ? `${highFeeChannel.name}促销费比达到 ${formatPercent(highFeeChannel.promoFeeRatio)}，应优先判断是全国活动无法局部下线导致，还是单渠道/单品机制过重。`
+      : `当前高费比渠道没有明显异常，促销效率风险主要来自预算节奏和活动占比。`,
+    flagshipShare !== null
+      ? `官旗/酒小二相关商户GMV占比 ${formatPercent(flagshipShare)}，距离30%目标仍差 ${formatPointDistance(flagshipTargetGap)}；若占比继续下滑，核心矛盾更可能在供给和拓店，而非继续加促销费。`
+      : `当前商户数据不足以识别官旗占比，建议补充旗舰店、酒小二等商户标签后再判断供给侧问题。`,
   ];
 
   const actions = [
-    targetGap < 0
-      ? `补 GMV：优先加码${topChannel?.name ?? "高GMV渠道"}与${topBrand?.name ?? "核心品牌"}，目标是把GMV目标达成率追平时间进度。`
-      : `稳 GMV：保留当前高贡献渠道资源，避免因过早收缩活动导致下周基盘回落。`,
-    budgetPressure > 0
-      ? `控费比：对${highFeeChannel?.name ?? "高费比渠道"}设置费用上限或改低门槛券，优先保留活动ROI高的活动。`
-      : `扩效率：预算节奏仍有空间，可以把新增预算投向GMV占比高且促销费比低的渠道。`,
-    topDriver
-      ? `区域动作：沉淀${topDriver.node}的有效活动和商户组合，复制到同 BU 内低增长区域。`
-      : `区域动作：建立区域周度复盘清单，逐区跟踪全量GMV、促销费比、活动GMV占比三项指标。`,
+    feeRisk !== null && feeRisk > 0
+      ? `控费比：先定位${feeRiskTarget}，按“下线活动、剔除高费低效品、券熔断、改门槛”顺序处理；若属于全国活动无法单区下线，则提示对应区域追加预算。`
+      : `稳费比：保留当前活动框架，但继续按BU/系统监控费比，防止下周单区域费用突然超支。`,
+    activityRiskLevel === "high"
+      ? `降依赖：${activityRiskTarget}活动GMV占比偏高，减少纯补贴放量，转向加品、换品和门槛优化，验证是否能带动基础GMV增长。`
+      : `促增长：预算未明显失控时，优先把资源投向GMV占比高且费比可控的渠道，同时观察活动GMV占比是否继续上行。`,
+    longTailBrand
+      ? `看结构：跟踪${longTailBrand.name}等中腰部/长尾品牌增长原因，对比竞品大单品满减和IP合作，判断是否正在侵蚀头部品牌。`
+      : `看竞品：补充百威、雪花、青岛等大单品活动机制和流量置换信息，作为下周品牌结构变化的解释变量。`,
+    flagshipShare !== null && flagshipTargetGap !== null && flagshipTargetGap > 0
+      ? `补官旗：官旗占比未达30%目标时，建议优先推动拓店和供给恢复，而不是继续抬费比；重点跟进酒小二/旗舰店供给缺口。`
+      : `固官旗：官旗链路若已接近目标，保持专人运营与拓店协同，避免服务商定制品下线再次拖累占比。`,
   ];
 
   const summary = [
@@ -923,6 +958,17 @@ export default function Home() {
   const brands = useMemo(
     () =>
       collectBreakdown(data.breakdowns.brands, "brand", period, selectedPlatforms, selectedLeaves),
+    [period, selectedPlatforms, selectedLeaves],
+  );
+  const merchants = useMemo(
+    () =>
+      collectBreakdown(
+        data.breakdowns.merchants,
+        "merchant",
+        period,
+        selectedPlatforms,
+        selectedLeaves,
+      ),
     [period, selectedPlatforms, selectedLeaves],
   );
   const previousBrands = useMemo(
@@ -1072,8 +1118,9 @@ export default function Home() {
         regionDrivers: regionRows,
         channels,
         brands,
+        merchants,
       }),
-    [current, previous, lastYear, region, regionRows, channels, brands],
+    [current, previous, lastYear, region, regionRows, channels, brands, merchants],
   );
 
   const generated = new Date(data.metadata.generatedAt).toLocaleString("zh-CN", {

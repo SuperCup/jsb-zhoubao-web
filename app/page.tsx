@@ -269,7 +269,12 @@ function formatPercent(value: number | null | undefined, digits = 1): string {
 function formatPointDelta(value: number | null | undefined): string {
   if (value === null || value === undefined || Number.isNaN(value)) return "-";
   const sign = value > 0 ? "+" : "";
-  return `${sign}${(value * 100).toFixed(1)}个百分点`;
+  return `${sign}${(value * 100).toFixed(1)}pp`;
+}
+
+function formatPointDistance(value: number | null | undefined): string {
+  if (value === null || value === undefined || Number.isNaN(value)) return "-";
+  return `${(Math.abs(value) * 100).toFixed(1)}pp`;
 }
 
 function formatDelta(value: number | null | undefined): string {
@@ -341,22 +346,326 @@ function SegmentButton({
   );
 }
 
-function KpiCard({
-  label,
-  value,
-  sub,
-  tone = "neutral",
-}: {
+type CoreMetric = {
   label: string;
   value: string;
   sub: string;
   tone?: "good" | "bad" | "neutral" | "warn";
+};
+
+type ScopeOption = {
+  id: string;
+  label: string;
+  platform: string;
+  variant: "merged" | "platform";
+};
+
+type ComboChartRow = {
+  label: string;
+  bar: number | null;
+  barLabel?: string;
+  primary?: number | null;
+  primaryLabel?: string;
+  secondary?: number | null;
+  secondaryLabel?: string;
+};
+
+function CoreMetricCard({
+  metric,
+  variant,
+}: {
+  metric: CoreMetric;
+  variant: "merged" | "platform";
 }) {
   return (
-    <article className={`kpi-card ${tone}`}>
-      <div className="kpi-label">{label}</div>
-      <div className="kpi-value">{value}</div>
-      <div className="kpi-sub">{sub}</div>
+    <article className={`core-metric-card ${variant} ${metric.tone ?? "neutral"}`}>
+      <div className="core-metric-label">{metric.label}</div>
+      <div className="core-metric-value">{metric.value}</div>
+      <div className="core-metric-sub">{metric.sub}</div>
+    </article>
+  );
+}
+
+function finiteNumber(value: number | null | undefined): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+function niceAmountMax(values: Array<number | null | undefined>): number {
+  const max = Math.max(0, ...values.filter(finiteNumber));
+  if (!max) return 1;
+  const magnitude = 10 ** Math.floor(Math.log10(max));
+  return Math.ceil(max / magnitude) * magnitude;
+}
+
+function nicePercentMax(values: Array<number | null | undefined>, fallback = 1): number {
+  const max = Math.max(0, ...values.filter(finiteNumber));
+  if (!max) return fallback;
+  if (max <= 0.4) return 0.4;
+  if (max <= 0.6) return 0.6;
+  if (max <= 0.8) return 0.8;
+  if (max <= 1) return 1;
+  return Math.ceil(max * 10) / 10;
+}
+
+function chartLabel(label: string): string {
+  return label.length > 7 ? `${label.slice(0, 7)}…` : label;
+}
+
+function buildScopeOptions(platform: string): ScopeOption[] {
+  if (platform === PLATFORM_ALL) {
+    return [
+      {
+        id: "merged",
+        label: "合并条件",
+        platform: PLATFORM_ALL,
+        variant: "merged",
+      },
+      ...data.metadata.platforms.map((item) => ({
+        id: item.id,
+        label: item.label,
+        platform: item.id,
+        variant: "platform" as const,
+      })),
+    ];
+  }
+  const selected = data.metadata.platforms.find((item) => item.id === platform);
+  return [
+    {
+      id: platform,
+      label: selected?.label ?? platform,
+      platform,
+      variant: "platform",
+    },
+  ];
+}
+
+function promoTargetText(row: Aggregate): string {
+  if (row.promoFeeRatio === null || row.targetPromoFeeRatio === null) return "目标 -";
+  const diff = row.promoFeeRatio - row.targetPromoFeeRatio;
+  return `${diff >= 0 ? "高于目标" : "低于目标"} ${formatPointDistance(diff)}`;
+}
+
+function activityShareText(value: number | null): string {
+  if (value === null) return "活动GMV -";
+  if (value >= 0.6) return "促销依赖度高";
+  if (value >= 0.45) return "促销贡献偏高";
+  return "促销依赖度可控";
+}
+
+function ComboBarLineChart({
+  title,
+  rows,
+  barName,
+  primaryName,
+  secondaryName,
+  barFormatter = formatMoney,
+  lineFormatter = formatPercent,
+  lineMax,
+}: {
+  title: string;
+  rows: ComboChartRow[];
+  barName: string;
+  primaryName: string;
+  secondaryName?: string;
+  barFormatter?: (value: number | null | undefined) => string;
+  lineFormatter?: (value: number | null | undefined) => string;
+  lineMax?: number;
+}) {
+  const chartRows = rows.slice(0, 14);
+  const width = 760;
+  const height = 360;
+  const left = 58;
+  const right = 58;
+  const top = 44;
+  const bottom = 82;
+  const plotWidth = width - left - right;
+  const plotHeight = height - top - bottom;
+  const plotBottom = top + plotHeight;
+  const step = plotWidth / Math.max(chartRows.length, 1);
+  const barWidth = Math.max(14, Math.min(34, step * 0.46));
+  const barMax = niceAmountMax(chartRows.map((row) => row.bar));
+  const computedLineMax =
+    lineMax ??
+    nicePercentMax(chartRows.flatMap((row) => [row.primary, row.secondary]), 1);
+  const xFor = (index: number) => left + step * index + step / 2;
+  const barY = (value: number) => plotBottom - (Math.max(value, 0) / barMax) * plotHeight;
+  const lineY = (value: number) =>
+    plotBottom - (Math.max(value, 0) / computedLineMax) * plotHeight;
+  const linePoints = (key: "primary" | "secondary") =>
+    chartRows
+      .map((row, index) => {
+        const value = row[key];
+        return finiteNumber(value) ? `${xFor(index)},${lineY(value)}` : null;
+      })
+      .filter(Boolean)
+      .join(" ");
+
+  return (
+    <article className="summary-chart-card">
+      <div className="summary-chart-heading">
+        <h3>{title}</h3>
+        <div className="chart-legend">
+          <span className="legend-bar">{barName}</span>
+          <span className="legend-primary">{primaryName}</span>
+          {secondaryName ? <span className="legend-secondary">{secondaryName}</span> : null}
+        </div>
+      </div>
+      <svg className="summary-chart" viewBox={`0 0 ${width} ${height}`} role="img" aria-label={title}>
+        {[0, 0.5, 1].map((ratio) => {
+          const y = plotBottom - ratio * plotHeight;
+          return (
+            <g key={ratio}>
+              <line className="chart-grid-line" x1={left} x2={width - right} y1={y} y2={y} />
+              <text className="chart-axis-label" x={left - 10} y={y + 4} textAnchor="end">
+                {barFormatter(barMax * ratio)}
+              </text>
+              <text className="chart-axis-label" x={width - right + 10} y={y + 4}>
+                {lineFormatter(computedLineMax * ratio)}
+              </text>
+            </g>
+          );
+        })}
+        {chartRows.map((row, index) => {
+          const value = row.bar ?? 0;
+          const x = xFor(index);
+          const y = barY(value);
+          const heightValue = plotBottom - y;
+          return (
+            <g key={`${row.label}-${index}`}>
+              <rect
+                className="chart-bar"
+                x={x - barWidth / 2}
+                y={y}
+                width={barWidth}
+                height={heightValue}
+                rx={3}
+              />
+              <text className="chart-value-label bar-label" x={x} y={Math.max(top + 14, y - 8)} textAnchor="middle">
+                {row.barLabel ?? barFormatter(row.bar)}
+              </text>
+              <text
+                className="chart-x-label"
+                x={x}
+                y={plotBottom + 28}
+                textAnchor="end"
+                transform={`rotate(-42 ${x} ${plotBottom + 28})`}
+              >
+                {chartLabel(row.label)}
+              </text>
+            </g>
+          );
+        })}
+        {linePoints("primary") ? (
+          <polyline className="chart-line primary" points={linePoints("primary")} />
+        ) : null}
+        {linePoints("secondary") ? (
+          <polyline className="chart-line secondary" points={linePoints("secondary")} />
+        ) : null}
+        {chartRows.map((row, index) => {
+          const x = xFor(index);
+          return (
+            <g key={`${row.label}-points-${index}`}>
+              {finiteNumber(row.primary) ? (
+                <>
+                  <circle className="chart-point primary" cx={x} cy={lineY(row.primary)} r={5} />
+                  <text className="chart-value-label primary-label" x={x} y={lineY(row.primary) - 12} textAnchor="middle">
+                    {row.primaryLabel ?? lineFormatter(row.primary)}
+                  </text>
+                </>
+              ) : null}
+              {finiteNumber(row.secondary) ? (
+                <>
+                  <circle className="chart-point secondary" cx={x} cy={lineY(row.secondary)} r={4} />
+                  <text className="chart-value-label secondary-label" x={x} y={lineY(row.secondary) + 22} textAnchor="middle">
+                    {row.secondaryLabel ?? lineFormatter(row.secondary)}
+                  </text>
+                </>
+              ) : null}
+            </g>
+          );
+        })}
+      </svg>
+    </article>
+  );
+}
+
+function SimpleBarChart({
+  title,
+  rows,
+  barName,
+  formatter = formatPercent,
+}: {
+  title: string;
+  rows: ComboChartRow[];
+  barName: string;
+  formatter?: (value: number | null | undefined) => string;
+}) {
+  const chartRows = rows.slice(0, 14);
+  const width = 760;
+  const height = 330;
+  const left = 54;
+  const right = 22;
+  const top = 42;
+  const bottom = 78;
+  const plotWidth = width - left - right;
+  const plotHeight = height - top - bottom;
+  const plotBottom = top + plotHeight;
+  const step = plotWidth / Math.max(chartRows.length, 1);
+  const barWidth = Math.max(16, Math.min(38, step * 0.5));
+  const barMax = nicePercentMax(chartRows.map((row) => row.bar), 0.2);
+  const xFor = (index: number) => left + step * index + step / 2;
+  const yFor = (value: number) => plotBottom - (Math.max(value, 0) / barMax) * plotHeight;
+
+  return (
+    <article className="summary-chart-card">
+      <div className="summary-chart-heading">
+        <h3>{title}</h3>
+        <div className="chart-legend">
+          <span className="legend-bar">{barName}</span>
+        </div>
+      </div>
+      <svg className="summary-chart" viewBox={`0 0 ${width} ${height}`} role="img" aria-label={title}>
+        {[0, 0.5, 1].map((ratio) => {
+          const y = plotBottom - ratio * plotHeight;
+          return (
+            <g key={ratio}>
+              <line className="chart-grid-line" x1={left} x2={width - right} y1={y} y2={y} />
+              <text className="chart-axis-label" x={left - 10} y={y + 4} textAnchor="end">
+                {formatter(barMax * ratio)}
+              </text>
+            </g>
+          );
+        })}
+        {chartRows.map((row, index) => {
+          const value = row.bar ?? 0;
+          const x = xFor(index);
+          const y = yFor(value);
+          return (
+            <g key={`${row.label}-${index}`}>
+              <rect
+                className="chart-bar"
+                x={x - barWidth / 2}
+                y={y}
+                width={barWidth}
+                height={plotBottom - y}
+                rx={3}
+              />
+              <text className="chart-value-label bar-label" x={x} y={Math.max(top + 14, y - 8)} textAnchor="middle">
+                {row.barLabel ?? formatter(row.bar)}
+              </text>
+              <text
+                className="chart-x-label"
+                x={x}
+                y={plotBottom + 28}
+                textAnchor="end"
+                transform={`rotate(-42 ${x} ${plotBottom + 28})`}
+              >
+                {chartLabel(row.label)}
+              </text>
+            </g>
+          );
+        })}
+      </svg>
     </article>
   );
 }
@@ -642,6 +951,116 @@ export default function Home() {
     () => collectActivities(data.breakdowns.activities, period, selectedPlatforms, selectedLeaves),
     [period, selectedPlatforms, selectedLeaves],
   );
+  const scopeOptions = useMemo(() => buildScopeOptions(platform), [platform]);
+  const coreMetricRows = useMemo(
+    () =>
+      scopeOptions.map((scope) => {
+        const row = buildAggregate(period, scope.platform, region);
+        const rowPrevious = buildAggregate(data.metadata.previousPeriodId, scope.platform, region);
+        const rowLastYear = buildAggregate(data.metadata.lastYearPeriodId, scope.platform, region);
+        const rowWow = comparisonEnabled ? compareAggregate(row, rowPrevious) : null;
+        const rowYoy = comparisonEnabled ? compareAggregate(row, rowLastYear) : null;
+        const targetGap =
+          row.targetAchievement !== null && row.timeProgress !== null
+            ? row.targetAchievement - row.timeProgress
+            : null;
+        const metrics: CoreMetric[] = [
+          {
+            label: "全量GMV",
+            value: formatMoney(row.gmv),
+            sub: `环比${formatDelta(rowWow)} 同比${formatDelta(rowYoy)}`,
+            tone: trendTone(rowWow) as "good" | "bad" | "neutral",
+          },
+          {
+            label: "促销费比",
+            value: formatPercent(row.promoFeeRatio),
+            sub: promoTargetText(row),
+            tone: trendTone(
+              row.promoFeeRatio !== null && row.targetPromoFeeRatio !== null
+                ? row.promoFeeRatio - row.targetPromoFeeRatio
+                : null,
+              true,
+            ) as "good" | "bad" | "neutral",
+          },
+          {
+            label: "目标达成率",
+            value: formatPercent(row.targetAchievement),
+            sub: `时间进度 ${formatPercent(row.timeProgress)}`,
+            tone: trendTone(targetGap) as "good" | "bad" | "neutral",
+          },
+          {
+            label: "活动GMV占比",
+            value: formatPercent(row.activityShare),
+            sub: activityShareText(row.activityShare),
+            tone: (row.activityShare ?? 0) >= 0.6 ? "warn" : "neutral",
+          },
+        ];
+        return { ...scope, metrics };
+      }),
+    [comparisonEnabled, period, region, scopeOptions],
+  );
+  const summaryPanels = useMemo(
+    () =>
+      scopeOptions.map((scope) => {
+        const regionNodes = regionTableNodes(region).filter((node) => node !== "总计");
+        const regionSummaryRows = regionNodes.map((node) => {
+          const row = buildAggregate(period, scope.platform, node);
+          return {
+            label: node,
+            bar: row.gmv,
+            barLabel: formatMoney(row.gmv),
+            primary: row.targetAchievement,
+            primaryLabel: formatPercent(row.targetAchievement, 0),
+            secondary: row.timeProgress,
+            secondaryLabel: formatPercent(row.timeProgress, 0),
+          };
+        });
+        const budgetSummaryRows = regionNodes.map((node) => {
+          const row = buildAggregate(period, scope.platform, node);
+          return {
+            label: node,
+            bar: Math.max(row.promoBudgetRemaining ?? 0, 0),
+            barLabel: formatMoney(row.promoBudgetRemaining),
+            primary: row.promoBudgetUsage,
+            primaryLabel: formatPercent(row.promoBudgetUsage, 0),
+          };
+        });
+        const promoFeeRows = regionNodes.map((node) => {
+          const row = buildAggregate(period, scope.platform, node);
+          return {
+            label: node,
+            bar: row.promoFeeRatio,
+            barLabel: formatPercent(row.promoFeeRatio),
+          };
+        });
+        const scopeAggregate = buildAggregate(period, scope.platform, region);
+        const channelRows = collectBreakdown(
+          data.breakdowns.channels,
+          "channel",
+          period,
+          new Set(platformIds(scope.platform)),
+          new Set(leavesFor(region)),
+        )
+          .slice(0, 8)
+          .map((row) => ({
+            label: row.name,
+            bar: row.gmv,
+            barLabel: formatMoney(row.gmv),
+            primary: safeRatio(row.gmv, scopeAggregate.gmv),
+            primaryLabel: formatPercent(safeRatio(row.gmv, scopeAggregate.gmv), 0),
+            secondary: scopeAggregate.timeProgress,
+            secondaryLabel: formatPercent(scopeAggregate.timeProgress, 0),
+          }));
+        return {
+          ...scope,
+          regionSummaryRows,
+          budgetSummaryRows,
+          channelRows,
+          promoFeeRows,
+        };
+      }),
+    [period, region, scopeOptions],
+  );
 
   const narrative = useMemo(
     () =>
@@ -728,37 +1147,20 @@ export default function Home() {
         </div>
       </section>
 
-      <section className="kpi-grid">
-        <KpiCard
-          label="全量GMV"
-          value={formatMoney(current.gmv)}
-          sub={`环比全量GMV ${formatDelta(wow)} / 同比全量GMV ${formatDelta(yoy)}`}
-          tone={trendTone(wow) as "good" | "bad" | "neutral"}
-        />
-        <KpiCard
-          label="GMV目标达成率"
-          value={formatPercent(current.targetAchievement)}
-          sub={`当月时间进度 ${formatPercent(current.timeProgress)} / 进度校正 ${formatPercent(current.paceAchievement)}`}
-          tone={trendTone((current.targetAchievement ?? 0) - (current.timeProgress ?? 0)) as "good" | "bad" | "neutral"}
-        />
-        <KpiCard
-          label="实际促销费比"
-          value={formatPercent(current.promoFeeRatio)}
-          sub={`环比促销费比 ${formatPointDelta(promoWow)} / 同比促销费比 ${formatPointDelta(promoYoy)}`}
-          tone={trendTone(promoWow, true) as "good" | "bad" | "neutral"}
-        />
-        <KpiCard
-          label="促销费"
-          value={formatMoney(current.subsidy)}
-          sub={`促销预算使用率 ${formatPercent(current.promoBudgetUsage)} / 剩余 ${formatMoney(current.promoBudgetRemaining)}`}
-          tone={trendTone((current.promoBudgetUsage ?? 0) - (current.timeProgress ?? 0), true) as "good" | "bad" | "neutral"}
-        />
-        <KpiCard
-          label="活动GMV占比"
-          value={formatPercent(current.activityShare)}
-          sub={`活动GMV ${formatMoney(current.activityGmv)} / 活动折扣率 ${formatPercent(current.activityDiscount)}`}
-          tone="warn"
-        />
+      <section className="core-matrix">
+        {coreMetricRows.map((row) => (
+          <div className={`core-scope-row ${row.variant}`} key={row.id}>
+            <div className="core-scope-label">
+              <span>{row.label}</span>
+              <small>{row.variant === "merged" ? "双平台合并" : "平台条件"}</small>
+            </div>
+            <div className="core-metric-grid">
+              {row.metrics.map((metric) => (
+                <CoreMetricCard key={`${row.id}-${metric.label}`} metric={metric} variant={row.variant} />
+              ))}
+            </div>
+          </div>
+        ))}
       </section>
 
       <section className="report-grid">
@@ -786,19 +1188,49 @@ export default function Home() {
       </section>
 
       <section className="summary-section">
-        <Panel title="Summary" kicker="关键读数与单位口径">
-          <div className="summary-grid">
-            {narrative.summary.map((item) => (
-              <article className="summary-card" key={item.label}>
-                <span>{item.label}</span>
-                <strong>{item.value}</strong>
-                <p>{item.note}</p>
-              </article>
+        <Panel title="Summary" kicker="图形表达按当前筛选区分合并条件与平台条件">
+          <div className="summary-scope-stack">
+            {summaryPanels.map((scope) => (
+              <div className="summary-scope" key={scope.id}>
+                <div className="summary-scope-title">
+                  <span>{scope.label}</span>
+                  <small>{periodLabel(period)} · {selectedRegionLabel(region)}</small>
+                </div>
+                <div className="summary-chart-grid">
+                  <ComboBarLineChart
+                    title={`${scope.label}-区域GMV及达成情况`}
+                    rows={scope.regionSummaryRows}
+                    barName="全量GMV"
+                    primaryName="目标GMV达成率"
+                    secondaryName="时间进度"
+                  />
+                  <ComboBarLineChart
+                    title={`${scope.label}-区域预算使用情况`}
+                    rows={scope.budgetSummaryRows}
+                    barName="促销预算剩余金额"
+                    primaryName="促销预算使用率"
+                    lineMax={1}
+                  />
+                  <ComboBarLineChart
+                    title={`${scope.label}-渠道GMV分布`}
+                    rows={scope.channelRows}
+                    barName="全量GMV"
+                    primaryName="全量GMV占比"
+                    secondaryName="时间进度"
+                    lineMax={nicePercentMax(scope.channelRows.flatMap((row) => [row.primary, row.secondary]), 0.6)}
+                  />
+                  <SimpleBarChart
+                    title={`${scope.label}-区域促销费比`}
+                    rows={scope.promoFeeRows}
+                    barName="促销费比"
+                  />
+                </div>
+              </div>
             ))}
           </div>
           <p className="unit-note">
             单位说明：金额源表单位为元，页面按元/万/亿自动缩写；占比、达成率、费比、折扣率均为百分比；
-            费比变化使用“百分点”，即两个百分比的直接差值；活动ROI单位为倍，核券量单位为张。
+            百分比差值使用 pp，即两个百分比的直接差值；活动ROI单位为倍，核券量单位为张。
           </p>
         </Panel>
       </section>

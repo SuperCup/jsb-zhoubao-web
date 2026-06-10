@@ -268,7 +268,8 @@ select {
 }
 
 .table-section,
-.detail-grid {
+.detail-grid,
+.summary-section {
   margin: 0 auto 16px;
   max-width: 1480px;
 }
@@ -522,6 +523,52 @@ select {
   padding-left: 20px;
 }
 
+.summary-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.summary-card {
+  min-height: 112px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-soft);
+  padding: 13px;
+}
+
+.summary-card span {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.summary-card strong {
+  display: block;
+  margin-top: 8px;
+  color: var(--ink);
+  font-size: 22px;
+  line-height: 1.2;
+}
+
+.summary-card p,
+.unit-note {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.summary-card p {
+  margin-top: 6px;
+}
+
+.unit-note {
+  margin-top: 12px;
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+}
+
 .table-scroll {
   overflow-x: auto;
   overflow-y: hidden;
@@ -651,6 +698,7 @@ select {
 @media (max-width: 1180px) {
   .control-band,
   .overview-grid,
+  .summary-grid,
   .drill-grid {
     grid-template-columns: 1fr 1fr;
   }
@@ -682,6 +730,8 @@ select {
   .control-band,
   .kpi-grid,
   .overview-grid,
+  .report-grid,
+  .summary-grid,
   .drill-grid,
   .recon-grid {
     grid-template-columns: 1fr;

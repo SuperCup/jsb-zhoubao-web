@@ -242,13 +242,23 @@ function formatMoney(value: number | null | undefined): string {
   const abs = Math.abs(value);
   if (abs >= 100000000) return `${(value / 100000000).toFixed(2)}亿`;
   if (abs >= 10000) return `${(value / 10000).toFixed(1)}万`;
-  return value.toLocaleString("zh-CN", { maximumFractionDigits: 0 });
+  return `${value.toLocaleString("zh-CN", { maximumFractionDigits: 0 })}元`;
 }
 
 function formatNumber(value: number | null | undefined): string {
   if (value === null || value === undefined || Number.isNaN(value)) return "-";
   if (Math.abs(value) >= 10000) return `${(value / 10000).toFixed(1)}万`;
   return value.toLocaleString("zh-CN", { maximumFractionDigits: 0 });
+}
+
+function formatCount(value: number | null | undefined, unit: string): string {
+  const formatted = formatNumber(value);
+  return formatted === "-" ? formatted : `${formatted}${unit}`;
+}
+
+function formatRoi(value: number | null | undefined): string {
+  if (value === null || value === undefined || Number.isNaN(value)) return "-";
+  return `${value.toFixed(1)}倍`;
 }
 
 function formatPercent(value: number | null | undefined, digits = 1): string {
@@ -259,7 +269,7 @@ function formatPercent(value: number | null | undefined, digits = 1): string {
 function formatPointDelta(value: number | null | undefined): string {
   if (value === null || value === undefined || Number.isNaN(value)) return "-";
   const sign = value > 0 ? "+" : "";
-  return `${sign}${(value * 100).toFixed(1)}pct`;
+  return `${sign}${(value * 100).toFixed(1)}个百分点`;
 }
 
 function formatDelta(value: number | null | undefined): string {
@@ -510,7 +520,30 @@ function buildNarrative({
       : `区域动作：建立区域周度复盘清单，逐区跟踪全量GMV、促销费比、活动GMV占比三项指标。`,
   ];
 
-  return { conclusions, analysis, actions };
+  const summary = [
+    {
+      label: "GMV表现",
+      value: formatMoney(current.gmv),
+      note: `环比 ${formatDelta(wow)}，同比 ${formatDelta(yoy)}`,
+    },
+    {
+      label: "目标与进度",
+      value: formatPercent(current.targetAchievement),
+      note: `当月时间进度 ${formatPercent(current.timeProgress)}，进度差 ${formatPointDelta(targetGap)}`,
+    },
+    {
+      label: "费用效率",
+      value: formatPercent(current.promoFeeRatio),
+      note: `促销费 ${formatMoney(current.subsidy)}，预算使用率 ${formatPercent(current.promoBudgetUsage)}`,
+    },
+    {
+      label: "结构抓手",
+      value: topChannel?.name ?? "-",
+      note: topBrand ? `核心品牌 ${topBrand.name}，活动GMV占比 ${formatPercent(current.activityShare)}` : `活动GMV占比 ${formatPercent(current.activityShare)}`,
+    },
+  ];
+
+  return { conclusions, analysis, actions, summary };
 }
 
 export default function Home() {
@@ -752,6 +785,24 @@ export default function Home() {
         </Panel>
       </section>
 
+      <section className="summary-section">
+        <Panel title="Summary" kicker="关键读数与单位口径">
+          <div className="summary-grid">
+            {narrative.summary.map((item) => (
+              <article className="summary-card" key={item.label}>
+                <span>{item.label}</span>
+                <strong>{item.value}</strong>
+                <p>{item.note}</p>
+              </article>
+            ))}
+          </div>
+          <p className="unit-note">
+            单位说明：金额源表单位为元，页面按元/万/亿自动缩写；占比、达成率、费比、折扣率均为百分比；
+            费比变化使用“百分点”，即两个百分比的直接差值；活动ROI单位为倍，核券量单位为张。
+          </p>
+        </Panel>
+      </section>
+
       <section className="table-section">
         <Panel title="月度总览" kicker="字段与 Excel 顶部总览保持一致">
           <div className="table-scroll">
@@ -960,8 +1011,8 @@ export default function Home() {
                     <td>{formatMoney(row.redemptionAmount)}</td>
                     <td>{formatMoney(row.activityGmv)}</td>
                     <td>{formatPercent(row.promoFeeRatio)}</td>
-                    <td>{row.activityRoi ? row.activityRoi.toFixed(1) : "-"}</td>
-                    <td>{formatNumber(row.couponCount)}</td>
+                    <td>{formatRoi(row.activityRoi)}</td>
+                    <td>{formatCount(row.couponCount, "张")}</td>
                   </tr>
                 ))}
               </tbody>

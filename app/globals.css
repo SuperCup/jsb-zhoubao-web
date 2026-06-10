@@ -259,6 +259,20 @@ select {
   align-items: stretch;
 }
 
+.report-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+  margin: 0 auto 16px;
+  max-width: 1480px;
+}
+
+.table-section,
+.detail-grid {
+  margin: 0 auto 16px;
+  max-width: 1480px;
+}
+
 .panel {
   min-width: 0;
   padding: 16px;
@@ -487,6 +501,110 @@ select {
   padding: 18px;
   color: var(--muted);
   text-align: center;
+}
+
+.narrative-list {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding-left: 18px;
+  color: var(--ink);
+  font-size: 14px;
+  line-height: 1.65;
+}
+
+.narrative-list li::marker {
+  color: var(--green);
+  font-weight: 800;
+}
+
+.narrative-list.ordered {
+  padding-left: 20px;
+}
+
+.table-scroll {
+  overflow-x: auto;
+  overflow-y: hidden;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.metric-table {
+  width: 100%;
+  min-width: 980px;
+  border-collapse: collapse;
+  background: var(--surface);
+  font-size: 13px;
+}
+
+.metric-table.compact {
+  min-width: 1240px;
+}
+
+.region-weekly-table {
+  min-width: 1360px;
+}
+
+.metric-table th,
+.metric-table td {
+  border-bottom: 1px solid var(--line);
+  padding: 10px 11px;
+  text-align: right;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+.metric-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: #edf5f1;
+  color: #41524c;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.25;
+}
+
+.metric-table thead tr:first-child th {
+  background: #dcefe8;
+  color: #174f3d;
+}
+
+.metric-table th:first-child,
+.metric-table td:first-child {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  max-width: 280px;
+  min-width: 110px;
+  background: inherit;
+  text-align: left;
+  white-space: normal;
+}
+
+.metric-table tbody th {
+  background: var(--surface-soft);
+  color: var(--ink);
+  font-weight: 800;
+}
+
+.metric-table tbody td {
+  background: #fff;
+}
+
+.metric-table tbody tr:hover td,
+.metric-table tbody tr:hover th {
+  background: #f0f8f4;
+}
+
+.metric-table .total-row th,
+.metric-table .total-row td {
+  background: #f6ead7;
+  font-weight: 800;
+}
+
+.clickable-row {
+  cursor: pointer;
 }
 
 .source-band {

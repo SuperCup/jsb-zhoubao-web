@@ -70,6 +70,7 @@ PLATFORMS = {
         "billActivityColumn": "商品原价总额",
         "billSubsidyColumn": "品牌补贴总额",
         "billOrderColumn": "饿了么订单号",
+        "billCampaignColumn": "活动名称",
     },
     "jd": {
         "label": "京东秒送",
@@ -83,6 +84,7 @@ PLATFORMS = {
         "billActivityColumn": "商品gov",
         "billSubsidyColumn": "品牌计费金额-含税",
         "billOrderColumn": "营销订单id",
+        "billCampaignColumn": "档期名称",
     },
 }
 
@@ -376,6 +378,57 @@ def build_breakdown(
     return rows
 
 
+def build_activity_breakdown(
+    bill_df: pd.DataFrame,
+    platform: dict[str, Any],
+    period: dict[str, Any],
+    platform_id: str,
+    top_n_per_region: int = 16,
+) -> list[dict[str, Any]]:
+    campaign_col = platform["billCampaignColumn"]
+    if campaign_col not in bill_df.columns:
+        return []
+    group_cols = ["清洗_大区", campaign_col]
+    bill = summarize_bill(bill_df, platform, group_cols)
+    bill = bill.rename(columns={"清洗_大区": "region", campaign_col: "activityName"})
+
+    rows: list[dict[str, Any]] = []
+    for _, row in bill.iterrows():
+        region = str(row["region"])
+        activity_name = str(row["activityName"]).strip() or "未识别"
+        if region not in REGION_PARENT or activity_name in {"nan", "None"}:
+            continue
+        subsidy = clean_number(row.get("subsidy"))
+        activity_gmv = clean_number(row.get("activityGmv"))
+        rows.append(
+            {
+                "platformId": platform_id,
+                "platformLabel": platform["label"],
+                "periodId": period["id"],
+                "periodLabel": period["label"],
+                "periodKind": period["kind"],
+                "region": region,
+                "parent": REGION_PARENT[region],
+                "activityName": activity_name,
+                "redemptionAmount": round_float(subsidy, 2),
+                "activityGmv": round_float(activity_gmv, 2),
+                "promoFeeRatio": round_float(safe_div(subsidy, activity_gmv)),
+                "activityRoi": round_float(safe_div(activity_gmv, subsidy)),
+                "couponCount": round_float(clean_number(row.get("activityOrders")), 0),
+            }
+        )
+
+    limited: list[dict[str, Any]] = []
+    buckets: dict[tuple[str, str, str], list[dict[str, Any]]] = defaultdict(list)
+    for row in rows:
+        buckets[(row["platformId"], row["periodId"], row["region"])].append(row)
+    for bucket_rows in buckets.values():
+        limited.extend(
+            sorted(bucket_rows, key=lambda item: item["redemptionAmount"] or 0, reverse=True)[:top_n_per_region]
+        )
+    return limited
+
+
 def aggregate_platform_reconciliation(
     records: list[dict[str, Any]],
     period: dict[str, Any],
@@ -423,6 +476,7 @@ def build_data() -> dict[str, Any]:
     brands: list[dict[str, Any]] = []
     merchants: list[dict[str, Any]] = []
     products: list[dict[str, Any]] = []
+    activities: list[dict[str, Any]] = []
     reconciliation: list[dict[str, Any]] = []
 
     for period in periods:
@@ -494,6 +548,7 @@ def build_data() -> dict[str, Any]:
                     full_df, bill_df, platform, period, platform_id, "清洗_商品名", "product", top_n_per_region=18
                 )
             )
+            activities.extend(build_activity_breakdown(bill_df, platform, period, platform_id))
             reconciliation.append(
                 aggregate_platform_reconciliation(records, period, platform_id, platform, full_df, bill_df)
             )
@@ -531,6 +586,7 @@ def build_data() -> dict[str, Any]:
             "brands": brands,
             "merchants": merchants,
             "products": products,
+            "activities": activities,
         },
         "reconciliation": reconciliation,
     }
@@ -578,6 +634,7 @@ def write_logic_doc(data: dict[str, Any]) -> None:
 - 渠道下钻：全量表按 `清洗_渠道` 统计 GMV，账单表按同字段补充活动 GMV 和促销费。
 - 品牌下钻：按 `清洗_品牌` 聚合。
 - 商户与商品下钻：每个平台、周期、区域保留 GMV Top 18，用于页面明细查看。
+- 活动名称下钻：按账单表活动名称聚合，输出 `核销金额`、`活动GMV`、`促销费比`、`活动ROI`、`核券量`。
 
 ## 校验
 

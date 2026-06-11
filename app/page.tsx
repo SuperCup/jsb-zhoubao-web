@@ -420,12 +420,6 @@ function buildScopeOptions(platform: string): ScopeOption[] {
         platform: PLATFORM_ALL,
         variant: "merged",
       },
-      ...data.metadata.platforms.map((item) => ({
-        id: item.id,
-        label: item.label,
-        platform: item.id,
-        variant: "platform" as const,
-      })),
     ];
   }
   const selected = data.metadata.platforms.find((item) => item.id === platform);
@@ -771,6 +765,7 @@ function buildNarrative({
   current,
   previous,
   lastYear,
+  scopeLabel,
   regionLabel,
   regionDrivers,
   channels,
@@ -780,6 +775,7 @@ function buildNarrative({
   current: Aggregate;
   previous: Aggregate;
   lastYear: Aggregate;
+  scopeLabel: string;
   regionLabel: string;
   regionDrivers: Array<{ node: string; current: Aggregate; previous: Aggregate }>;
   channels: Array<{ name: string } & Aggregate>;
@@ -790,6 +786,8 @@ function buildNarrative({
   const yoy = compareAggregate(current, lastYear);
   const targetGap = (current.targetAchievement ?? 0) - (current.timeProgress ?? 0);
   const budgetPressure = (current.promoBudgetUsage ?? 0) - (current.timeProgress ?? 0);
+  const targetGmvGap =
+    current.target && current.timeProgress !== null ? current.target * current.timeProgress - current.gmv : null;
   const topDriver = regionDrivers
     .filter((item) => item.node !== "总计")
     .map((item) => ({
@@ -797,6 +795,23 @@ function buildNarrative({
       inc: item.current.gmv - item.previous.gmv,
     }))
     .sort((a, b) => b.inc - a.inc)[0];
+  const weakDriver = regionDrivers
+    .filter((item) => item.node !== "总计")
+    .map((item) => ({
+      ...item,
+      inc: item.current.gmv - item.previous.gmv,
+    }))
+    .sort((a, b) => a.inc - b.inc)[0];
+  const highFeeRegion = regionDrivers
+    .filter((item) => item.node !== "总计" && item.current.gmv > current.gmv * 0.01)
+    .sort((a, b) => (b.current.promoFeeRatio ?? 0) - (a.current.promoFeeRatio ?? 0))[0];
+  const fastBudgetRegion = regionDrivers
+    .filter((item) => item.node !== "总计" && item.current.promoBudgetUsage !== null)
+    .sort((a, b) => {
+      const aGap = (a.current.promoBudgetUsage ?? 0) - (a.current.timeProgress ?? 0);
+      const bGap = (b.current.promoBudgetUsage ?? 0) - (b.current.timeProgress ?? 0);
+      return bGap - aGap;
+    })[0];
   const topChannel = channels[0];
   const topBrand = brands[0];
   const topBrandsShare = brands
@@ -826,42 +841,50 @@ function buildNarrative({
   const feeRiskTarget =
     highFeeChannel?.name ?? (regionLabel === "全国/全区域" ? "高费比BU/系统" : regionLabel);
   const activityRiskTarget = highActivityChannel?.name ?? topChannel?.name ?? "活动渠道";
+  const reportScope = `${scopeLabel} · ${regionLabel}`;
 
   const conclusions = [
-    `${regionLabel}本周全量GMV ${formatMoney(current.gmv)}，环比${formatDelta(wow)}，同比${formatDelta(yoy)}。`,
-    `GMV目标达成率 ${formatPercent(current.targetAchievement)}，当月时间进度 ${formatPercent(current.timeProgress)}，当前节奏${targetGap >= 0 ? "领先" : "落后"} ${formatPointDelta(Math.abs(targetGap))}。`,
+    `${reportScope}目标分析周期全量GMV ${formatMoney(current.gmv)}，环比${formatDelta(wow)}，同比${formatDelta(yoy)}。`,
+    `GMV目标达成率 ${formatPercent(current.targetAchievement)}，时间进度 ${formatPercent(current.timeProgress)}，${targetGap >= 0 ? "领先" : "落后"}时间进度 ${formatPointDistance(targetGap)}${targetGmvGap !== null && targetGmvGap > 0 ? `，折算需补 ${formatMoney(targetGmvGap)} GMV` : ""}。`,
     `实际促销费比 ${formatPercent(current.promoFeeRatio)}，${feeRisk !== null ? `${feeRisk >= 0 ? "高于" : "低于"}目标 ${formatPointDistance(feeRisk)}` : "目标费比缺失"}；活动GMV占比 ${formatPercent(current.activityShare)}，${activityRiskLevel === "high" ? "促销依赖偏高" : activityRiskLevel === "watch" ? "需观察自然增长承接" : "活动依赖相对可控"}。`,
-    `促销预算使用率 ${formatPercent(current.promoBudgetUsage)}，预算消耗${budgetPressure > 0 ? "快于" : "慢于"}时间进度 ${formatPointDistance(budgetPressure)}，需结合BU/系统判断是否追加区域预算。`,
+    `促销预算使用率 ${formatPercent(current.promoBudgetUsage)}，${budgetPressure >= 0 ? "快于" : "慢于"}时间进度 ${formatPointDistance(budgetPressure)}；${fastBudgetRegion ? `${fastBudgetRegion.node}预算使用率 ${formatPercent(fastBudgetRegion.current.promoBudgetUsage)} 是重点观察对象` : "当前范围暂无可下钻预算节点"}。`,
   ];
 
   const analysis = [
     topDriver
-      ? `${topDriver.node}是本周主要增量来源，较上周增加 ${formatMoney(topDriver.inc)}；若大盘费比异常，应先下钻该BU/系统，再看渠道、品牌和活动机制。`
-      : `本周区域增量来源不集中，费比监控需从大盘切到各BU/系统，避免单一区域或系统费用失控被总盘掩盖。`,
+      ? `${topDriver.node}贡献最大环比增量 ${formatMoney(topDriver.inc)}；${weakDriver ? `${weakDriver.node}环比变化 ${formatMoney(weakDriver.inc)}，是拖累或低增节点。` : ""}`
+      : `${reportScope}没有可拆分的区域增量节点，当前诊断以整体GMV ${formatMoney(current.gmv)} 和费比 ${formatPercent(current.promoFeeRatio)} 为主。`,
     topChannel && topBrand
-      ? `渠道侧${topChannel.name}贡献最高，全量GMV ${formatMoney(topChannel.gmv)}；品牌侧${topBrand.name}贡献最高，Top4品牌GMV占比 ${formatPercent(topBrandsShare)}，需持续观察中腰部/长尾品牌是否侵蚀头部份额。`
-      : `渠道和品牌结构数据不足以形成明确主贡献判断，建议补充竞品活动机制、IP合作和流量置换信息。`,
+      ? `渠道侧${topChannel.name}贡献最高，GMV ${formatMoney(topChannel.gmv)}、占比 ${formatPercent(safeRatio(topChannel.gmv, current.gmv))}；品牌侧${topBrand.name}贡献最高，Top4品牌GMV占比 ${formatPercent(topBrandsShare)}。`
+      : `${reportScope}当前缺少渠道或品牌拆分，无法判定具体结构驱动；已展示的全量GMV为 ${formatMoney(current.gmv)}。`,
     highFeeChannel
-      ? `${highFeeChannel.name}促销费比达到 ${formatPercent(highFeeChannel.promoFeeRatio)}，应优先判断是全国活动无法局部下线导致，还是单渠道/单品机制过重。`
-      : `当前高费比渠道没有明显异常，促销效率风险主要来自预算节奏和活动占比。`,
+      ? `${highFeeChannel.name}促销费比 ${formatPercent(highFeeChannel.promoFeeRatio)}，${highFeeRegion ? `${highFeeRegion.node}区域费比 ${formatPercent(highFeeRegion.current.promoFeeRatio)}；` : ""}需要判断是全国活动无法局部下线，还是单渠道/单品机制过重。`
+      : `渠道费比未出现大额异常，当前整体促销费比 ${formatPercent(current.promoFeeRatio)}，主要风险来自活动GMV占比 ${formatPercent(current.activityShare)}。`,
+    highActivityChannel
+      ? `${highActivityChannel.name}活动GMV占比 ${formatPercent(highActivityChannel.activityShare)}，高于当前范围整体 ${formatPercent(current.activityShare)}；若继续升高，说明基础GMV承接不足。`
+      : `当前没有超过GMV 3%门槛的高活动依赖渠道，整体活动GMV占比为 ${formatPercent(current.activityShare)}。`,
     flagshipShare !== null
-      ? `官旗/酒小二相关商户GMV占比 ${formatPercent(flagshipShare)}，距离30%目标仍差 ${formatPointDistance(flagshipTargetGap)}；若占比继续下滑，核心矛盾更可能在供给和拓店，而非继续加促销费。`
-      : `当前商户数据不足以识别官旗占比，建议补充旗舰店、酒小二等商户标签后再判断供给侧问题。`,
+      ? flagshipTargetGap !== null && flagshipTargetGap > 0
+        ? `官旗/酒小二相关商户GMV占比 ${formatPercent(flagshipShare)}，距离30%目标仍差 ${formatPointDistance(flagshipTargetGap)}；若占比继续下滑，核心矛盾更可能在供给和拓店，而非继续加促销费。`
+        : `官旗/酒小二相关商户GMV占比 ${formatPercent(flagshipShare)}，已达到或超过30%目标；后续重点是稳住供给和专人运营，避免服务商定制品下线再次拖累占比。`
+      : `${reportScope}商户数据无法识别官旗/酒小二，无法核算30%官旗目标差距。`,
   ];
 
   const actions = [
     feeRisk !== null && feeRisk > 0
-      ? `控费比：先定位${feeRiskTarget}，按“下线活动、剔除高费低效品、券熔断、改门槛”顺序处理；若属于全国活动无法单区下线，则提示对应区域追加预算。`
-      : `稳费比：保留当前活动框架，但继续按BU/系统监控费比，防止下周单区域费用突然超支。`,
+      ? `控费比：${reportScope}费比高于目标 ${formatPointDistance(feeRisk)}，先处理${feeRiskTarget}；按“下线活动、剔除高费低效品、券熔断、改门槛”顺序执行，若全国活动不能单区下线，则对${fastBudgetRegion?.node ?? regionLabel}追加区域预算。`
+      : `稳费比：${reportScope}费比未高于目标，保留当前机制；下周继续盯${fastBudgetRegion?.node ?? regionLabel}预算使用率 ${formatPercent(fastBudgetRegion?.current.promoBudgetUsage ?? current.promoBudgetUsage)}。`,
     activityRiskLevel === "high"
-      ? `降依赖：${activityRiskTarget}活动GMV占比偏高，减少纯补贴放量，转向加品、换品和门槛优化，验证是否能带动基础GMV增长。`
-      : `促增长：预算未明显失控时，优先把资源投向GMV占比高且费比可控的渠道，同时观察活动GMV占比是否继续上行。`,
+      ? `降依赖：${activityRiskTarget}活动GMV占比 ${formatPercent(highActivityChannel?.activityShare ?? current.activityShare)}，减少纯补贴放量，改为加品、换品和门槛优化，目标是把整体活动GMV占比从 ${formatPercent(current.activityShare)} 拉回60%以内。`
+      : `促增长：活动GMV占比 ${formatPercent(current.activityShare)} 未超过70%高风险线，优先把资源投向${topChannel?.name ?? "最高GMV渠道"}，该渠道GMV ${formatMoney(topChannel?.gmv ?? current.gmv)}、费比 ${formatPercent(topChannel?.promoFeeRatio ?? current.promoFeeRatio)}。`,
     longTailBrand
-      ? `看结构：跟踪${longTailBrand.name}等中腰部/长尾品牌增长原因，对比竞品大单品满减和IP合作，判断是否正在侵蚀头部品牌。`
-      : `看竞品：补充百威、雪花、青岛等大单品活动机制和流量置换信息，作为下周品牌结构变化的解释变量。`,
-    flagshipShare !== null && flagshipTargetGap !== null && flagshipTargetGap > 0
-      ? `补官旗：官旗占比未达30%目标时，建议优先推动拓店和供给恢复，而不是继续抬费比；重点跟进酒小二/旗舰店供给缺口。`
-      : `固官旗：官旗链路若已接近目标，保持专人运营与拓店协同，避免服务商定制品下线再次拖累占比。`,
+      ? `看结构：${longTailBrand.name}在Top4之外贡献 ${formatMoney(longTailBrand.gmv)}、占比 ${formatPercent(safeRatio(longTailBrand.gmv, current.gmv))}，下周对比竞品大单品满减和IP合作，判断是否侵蚀${topBrand?.name ?? "头部品牌"}。`
+      : `看结构：当前Top4品牌占比 ${formatPercent(topBrandsShare)}，未识别到GMV超过1%的长尾品牌；下周重点看${topBrand?.name ?? "头部品牌"}是否继续集中。`,
+    flagshipShare === null
+      ? `补标签：当前范围无法识别官旗/酒小二GMV，先补齐旗舰店、官方、自营、酒小二商户标签，再判断30%官旗目标差距。`
+      : flagshipTargetGap !== null && flagshipTargetGap > 0
+        ? `补官旗：官旗/酒小二占比 ${formatPercent(flagshipShare)}，距离30%目标差 ${formatPointDistance(flagshipTargetGap)}，优先推动拓店和供给恢复，而不是继续抬费比；重点跟进酒小二/旗舰店供给缺口。`
+        : `固官旗：官旗/酒小二占比 ${formatPercent(flagshipShare)} 已接近或达到30%目标，保持专人运营与拓店协同，避免服务商定制品下线再次拖累占比。`,
   ];
 
   const summary = [
@@ -892,8 +915,8 @@ function buildNarrative({
 
 export default function Home() {
   const [platform, setPlatform] = useState(PLATFORM_ALL);
-  const [period, setPeriod] = useState(data.metadata.currentPeriodId);
   const [region, setRegion] = useState(REGION_ALL);
+  const period = data.metadata.currentPeriodId;
 
   const selectedLeaves = useMemo(() => new Set(leavesFor(region)), [region]);
   const selectedPlatforms = useMemo(() => new Set(platformIds(platform)), [platform]);
@@ -907,7 +930,7 @@ export default function Home() {
     [platform, region],
   );
 
-  const comparisonEnabled = period === data.metadata.currentPeriodId;
+  const comparisonEnabled = true;
   const wow = comparisonEnabled ? compareAggregate(current, previous) : null;
   const yoy = comparisonEnabled ? compareAggregate(current, lastYear) : null;
   const promoWow = comparisonEnabled ? promoRatioChange(current, previous) : null;
@@ -1107,6 +1130,10 @@ export default function Home() {
       }),
     [period, region, scopeOptions],
   );
+  const selectedPlatformLabel =
+    platform === PLATFORM_ALL
+      ? "双平台合并"
+      : data.metadata.platforms.find((item) => item.id === platform)?.label ?? platform;
 
   const narrative = useMemo(
     () =>
@@ -1114,13 +1141,24 @@ export default function Home() {
         current,
         previous,
         lastYear,
+        scopeLabel: selectedPlatformLabel,
         regionLabel: selectedRegionLabel(region),
         regionDrivers: regionRows,
         channels,
         brands,
         merchants,
       }),
-    [current, previous, lastYear, region, regionRows, channels, brands, merchants],
+    [
+      current,
+      previous,
+      lastYear,
+      selectedPlatformLabel,
+      region,
+      regionRows,
+      channels,
+      brands,
+      merchants,
+    ],
   );
 
   const generated = new Date(data.metadata.generatedAt).toLocaleString("zh-CN", {
@@ -1145,11 +1183,6 @@ export default function Home() {
             <span>数据生成 {generated}</span>
           </div>
         </div>
-        <div className="status-block">
-          <span>Excel 字段口径</span>
-          <strong>月度总览 + 区域周报 + 渠道/品牌/活动</strong>
-          <small>字段名称和指标顺序按原 Excel 周报对齐</small>
-        </div>
       </header>
 
       <section className="control-band">
@@ -1162,16 +1195,6 @@ export default function Home() {
             {data.metadata.platforms.map((item) => (
               <SegmentButton active={platform === item.id} key={item.id} onClick={() => setPlatform(item.id)}>
                 {item.label}
-              </SegmentButton>
-            ))}
-          </div>
-        </div>
-        <div className="control-group">
-          <label>周期</label>
-          <div className="segments">
-            {data.metadata.periods.map((item) => (
-              <SegmentButton active={period === item.id} key={item.id} onClick={() => setPeriod(item.id)}>
-                {item.shortLabel}
               </SegmentButton>
             ))}
           </div>
@@ -1210,27 +1233,34 @@ export default function Home() {
         ))}
       </section>
 
-      <section className="report-grid">
-        <Panel title="结论" kicker="区域周报自动解读">
-          <ul className="narrative-list">
-            {narrative.conclusions.map((item) => (
-              <li key={item}>{item}</li>
-            ))}
-          </ul>
-        </Panel>
-        <Panel title="分析" kicker="本周驱动与风险">
-          <ul className="narrative-list">
-            {narrative.analysis.map((item) => (
-              <li key={item}>{item}</li>
-            ))}
-          </ul>
-        </Panel>
-        <Panel title="行动建议" kicker="下周可执行动作">
-          <ol className="narrative-list ordered">
-            {narrative.actions.map((item) => (
-              <li key={item}>{item}</li>
-            ))}
-          </ol>
+      <section className="diagnostic-section">
+        <Panel title="AI诊断报告" kicker={`${selectedPlatformLabel} · ${selectedRegionLabel(region)} · ${periodLabel(period)}`}>
+          <div className="diagnostic-grid">
+            <article className="diagnostic-card">
+              <h3>结论</h3>
+              <ul className="narrative-list">
+                {narrative.conclusions.map((item) => (
+                  <li key={item}>{item}</li>
+                ))}
+              </ul>
+            </article>
+            <article className="diagnostic-card">
+              <h3>诊断分析</h3>
+              <ul className="narrative-list">
+                {narrative.analysis.map((item) => (
+                  <li key={item}>{item}</li>
+                ))}
+              </ul>
+            </article>
+            <article className="diagnostic-card">
+              <h3>行动建议</h3>
+              <ol className="narrative-list ordered">
+                {narrative.actions.map((item) => (
+                  <li key={item}>{item}</li>
+                ))}
+              </ol>
+            </article>
+          </div>
         </Panel>
       </section>
 
@@ -1500,24 +1530,6 @@ export default function Home() {
         </Panel>
       </section>
 
-      <section className="source-band">
-        <details>
-          <summary>数据来源与校验口径</summary>
-          <div className="source-content">
-            <p>
-              字段展示按 Excel 原表结构对齐。全量GMV取全量明细，活动GMV与促销费取账单明细，目标和预算取
-              <code>目标GMV.xlsx</code> 与 <code>分BU预算金额.xlsx</code>。区域按 <code>清洗_大区</code> 匹配。
-            </p>
-            <div className="recon-grid">
-              {data.reconciliation.map((item) => (
-                <span key={`${item.platformId}-${item.periodId}`}>
-                  {item.platformLabel as string} {item.periodId as string}: 差异 {formatMoney(Number(item.gmvDiff))}
-                </span>
-              ))}
-            </div>
-          </div>
-        </details>
-      </section>
     </main>
   );
 }

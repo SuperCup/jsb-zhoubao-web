@@ -19,7 +19,7 @@ SOURCE_DIR = Path(
     )
 )
 OUTPUT_JSON = Path(
-    os.environ.get("OUTPUT_JSON", WORKSPACE / "app" / "data" / "dashboard-data.json")
+    os.environ.get("OUTPUT_JSON", WORKSPACE / "public" / "data" / "dashboard-data.json")
 )
 LOGIC_DOC = Path(os.environ.get("LOGIC_DOC", WORKSPACE / "docs" / "取数逻辑说明.md"))
 
@@ -333,29 +333,95 @@ def build_breakdown(
     dimension_col: str,
     dimension_key: str,
     top_n_per_region: int | None = None,
+    product_scoped: bool = False,
 ) -> list[dict[str, Any]]:
-    group_cols = ["清洗_大区", dimension_col]
+    group_cols = ["清洗_大区"]
+    if product_scoped:
+        group_cols.append("清洗_商品名")
+    group_cols.append(dimension_col)
     full = summarize_full(full_df, platform, group_cols)
     bill = summarize_bill(bill_df, platform, group_cols)
     merged = merge_metric_frames(full, bill, group_cols)
-    merged = merged.rename(columns={"清洗_大区": "region", dimension_col: dimension_key})
+    rename_cols = {"清洗_大区": "region", dimension_col: dimension_key}
+    if product_scoped:
+        rename_cols["清洗_商品名"] = "product"
+    merged = merged.rename(columns=rename_cols)
 
     rows: list[dict[str, Any]] = []
     for _, row in merged.iterrows():
         region = str(row["region"])
         if region not in REGION_PARENT:
             continue
+        record = {
+            "platformId": platform_id,
+            "platformLabel": platform["label"],
+            "periodId": period["id"],
+            "periodLabel": period["label"],
+            "periodKind": period["kind"],
+            "region": region,
+            "parent": REGION_PARENT[region],
+            dimension_key: str(row[dimension_key]),
+            "gmv": clean_number(row.get("gmv")),
+            "quantity": clean_number(row.get("quantity")),
+            "orders": clean_number(row.get("orders")),
+            "users": clean_number(row.get("users")),
+            "activityGmv": clean_number(row.get("activityGmv")),
+            "subsidy": clean_number(row.get("subsidy")),
+            "activityOrders": clean_number(row.get("activityOrders")),
+        }
+        if product_scoped:
+            record["product"] = str(row["product"])
+        rows.append(enrich_record(record))
+
+    if top_n_per_region:
+        limited: list[dict[str, Any]] = []
+        buckets: dict[tuple[str, str, str], list[dict[str, Any]]] = defaultdict(list)
+        for row in rows:
+            product_key = row.get("product", "")
+            buckets[(row["platformId"], row["periodId"], row["region"], product_key)].append(row)
+        for bucket_rows in buckets.values():
+            limited.extend(sorted(bucket_rows, key=lambda item: item["gmv"], reverse=True)[:top_n_per_region])
+        return limited
+    return rows
+
+
+def build_product_records(
+    full_df: pd.DataFrame,
+    bill_df: pd.DataFrame,
+    platform: dict[str, Any],
+    period: dict[str, Any],
+    platform_id: str,
+    platform_target: dict[str, float],
+    bu_budget: dict[tuple[str, int, str], dict[str, float]],
+) -> list[dict[str, Any]]:
+    group_cols = ["清洗_大区", "清洗_商品名"]
+    full = summarize_full(full_df, platform, group_cols)
+    bill = summarize_bill(bill_df, platform, group_cols)
+    merged = merge_metric_frames(full, bill, group_cols)
+
+    rows: list[dict[str, Any]] = []
+    for _, row in merged.iterrows():
+        region = str(row["清洗_大区"])
+        product = str(row["清洗_商品名"]).strip() or "未识别"
+        if region not in REGION_PARENT or product in {"nan", "None"}:
+            continue
+        budget_key = (platform["sourcePlatform"], period["monthKey"], region)
+        budget = bu_budget.get(budget_key, {})
         rows.append(
             enrich_record(
                 {
                     "platformId": platform_id,
                     "platformLabel": platform["label"],
+                    "sourcePlatform": platform["sourcePlatform"],
                     "periodId": period["id"],
                     "periodLabel": period["label"],
                     "periodKind": period["kind"],
+                    "monthKey": period["monthKey"],
+                    "monthLabel": period["monthLabel"],
+                    "timeProgress": period["timeProgress"],
                     "region": region,
                     "parent": REGION_PARENT[region],
-                    dimension_key: str(row[dimension_key]),
+                    "product": product,
                     "gmv": clean_number(row.get("gmv")),
                     "quantity": clean_number(row.get("quantity")),
                     "orders": clean_number(row.get("orders")),
@@ -363,18 +429,17 @@ def build_breakdown(
                     "activityGmv": clean_number(row.get("activityGmv")),
                     "subsidy": clean_number(row.get("subsidy")),
                     "activityOrders": clean_number(row.get("activityOrders")),
+                    "budget": clean_number(budget.get("budget")),
+                    "buTarget": clean_number(budget.get("buTarget")),
+                    "supportBudget": clean_number(budget.get("supportBudget")),
+                    "targetGmv": clean_number(platform_target.get("targetGmv")),
+                    "lastYearTargetGmv": clean_number(platform_target.get("lastYearTargetGmv")),
+                    "actualTmFeeRatio": clean_number(platform_target.get("actualTmFeeRatio")),
+                    "lastYearTmFeeRatio": clean_number(platform_target.get("lastYearTmFeeRatio")),
+                    "targetPromoFeeRatio": clean_number(platform_target.get("targetPromoFeeRatio")),
                 }
             )
         )
-
-    if top_n_per_region:
-        limited: list[dict[str, Any]] = []
-        buckets: dict[tuple[str, str, str], list[dict[str, Any]]] = defaultdict(list)
-        for row in rows:
-            buckets[(row["platformId"], row["periodId"], row["region"])].append(row)
-        for bucket_rows in buckets.values():
-            limited.extend(sorted(bucket_rows, key=lambda item: item["gmv"], reverse=True)[:top_n_per_region])
-        return limited
     return rows
 
 
@@ -384,13 +449,20 @@ def build_activity_breakdown(
     period: dict[str, Any],
     platform_id: str,
     top_n_per_region: int = 16,
+    product_scoped: bool = False,
 ) -> list[dict[str, Any]]:
     campaign_col = platform["billCampaignColumn"]
     if campaign_col not in bill_df.columns:
         return []
-    group_cols = ["清洗_大区", campaign_col]
+    group_cols = ["清洗_大区"]
+    if product_scoped:
+        group_cols.append("清洗_商品名")
+    group_cols.append(campaign_col)
     bill = summarize_bill(bill_df, platform, group_cols)
-    bill = bill.rename(columns={"清洗_大区": "region", campaign_col: "activityName"})
+    rename_cols = {"清洗_大区": "region", campaign_col: "activityName"}
+    if product_scoped:
+        rename_cols["清洗_商品名"] = "product"
+    bill = bill.rename(columns=rename_cols)
 
     rows: list[dict[str, Any]] = []
     for _, row in bill.iterrows():
@@ -410,6 +482,7 @@ def build_activity_breakdown(
                 "region": region,
                 "parent": REGION_PARENT[region],
                 "activityName": activity_name,
+                **({"product": str(row["product"])} if product_scoped else {}),
                 "redemptionAmount": round_float(subsidy, 2),
                 "activityGmv": round_float(activity_gmv, 2),
                 "promoFeeRatio": round_float(safe_div(subsidy, activity_gmv)),
@@ -421,7 +494,8 @@ def build_activity_breakdown(
     limited: list[dict[str, Any]] = []
     buckets: dict[tuple[str, str, str], list[dict[str, Any]]] = defaultdict(list)
     for row in rows:
-        buckets[(row["platformId"], row["periodId"], row["region"])].append(row)
+        product_key = row.get("product", "")
+        buckets[(row["platformId"], row["periodId"], row["region"], product_key)].append(row)
     for bucket_rows in buckets.values():
         limited.extend(
             sorted(bucket_rows, key=lambda item: item["redemptionAmount"] or 0, reverse=True)[:top_n_per_region]
@@ -472,11 +546,16 @@ def build_data() -> dict[str, Any]:
         )
 
     records: list[dict[str, Any]] = []
+    product_records: list[dict[str, Any]] = []
     channels: list[dict[str, Any]] = []
+    channels_by_product: list[dict[str, Any]] = []
     brands: list[dict[str, Any]] = []
+    brands_by_product: list[dict[str, Any]] = []
     merchants: list[dict[str, Any]] = []
+    merchants_by_product: list[dict[str, Any]] = []
     products: list[dict[str, Any]] = []
     activities: list[dict[str, Any]] = []
+    activities_by_product: list[dict[str, Any]] = []
     reconciliation: list[dict[str, Any]] = []
 
     for period in periods:
@@ -532,15 +611,55 @@ def build_data() -> dict[str, Any]:
                 }
                 records.append(enrich_record(record))
 
+            product_records.extend(
+                build_product_records(full_df, bill_df, platform, period, platform_id, platform_target, bu_budget)
+            )
             channels.extend(
                 build_breakdown(full_df, bill_df, platform, period, platform_id, "清洗_渠道", "channel")
+            )
+            channels_by_product.extend(
+                build_breakdown(
+                    full_df,
+                    bill_df,
+                    platform,
+                    period,
+                    platform_id,
+                    "清洗_渠道",
+                    "channel",
+                    product_scoped=True,
+                )
             )
             brands.extend(
                 build_breakdown(full_df, bill_df, platform, period, platform_id, "清洗_品牌", "brand")
             )
+            brands_by_product.extend(
+                build_breakdown(
+                    full_df,
+                    bill_df,
+                    platform,
+                    period,
+                    platform_id,
+                    "清洗_品牌",
+                    "brand",
+                    product_scoped=True,
+                )
+            )
             merchants.extend(
                 build_breakdown(
                     full_df, bill_df, platform, period, platform_id, "清洗_商户", "merchant", top_n_per_region=18
+                )
+            )
+            merchants_by_product.extend(
+                build_breakdown(
+                    full_df,
+                    bill_df,
+                    platform,
+                    period,
+                    platform_id,
+                    "清洗_商户",
+                    "merchant",
+                    top_n_per_region=18,
+                    product_scoped=True,
                 )
             )
             products.extend(
@@ -549,11 +668,18 @@ def build_data() -> dict[str, Any]:
                 )
             )
             activities.extend(build_activity_breakdown(bill_df, platform, period, platform_id))
+            activities_by_product.extend(
+                build_activity_breakdown(bill_df, platform, period, platform_id, product_scoped=True)
+            )
             reconciliation.append(
                 aggregate_platform_reconciliation(records, period, platform_id, platform, full_df, bill_df)
             )
 
     add_comparisons(records)
+    product_totals: dict[str, float] = defaultdict(float)
+    for row in product_records:
+        if row["periodId"] == "0601-0607" and row.get("product"):
+            product_totals[str(row["product"])] += row.get("gmv", 0) or 0
 
     return {
         "metadata": {
@@ -579,14 +705,24 @@ def build_data() -> dict[str, Any]:
                 "YN": ["YN"],
                 "未识别": ["未识别"],
             },
+            "productOrder": [
+                product
+                for product, _ in sorted(product_totals.items(), key=lambda item: item[1], reverse=True)
+                if product not in {"未识别", "nan", "None", ""}
+            ],
         },
         "records": records,
+        "productRecords": product_records,
         "breakdowns": {
             "channels": channels,
+            "channelsByProduct": channels_by_product,
             "brands": brands,
+            "brandsByProduct": brands_by_product,
             "merchants": merchants,
+            "merchantsByProduct": merchants_by_product,
             "products": products,
             "activities": activities,
+            "activitiesByProduct": activities_by_product,
         },
         "reconciliation": reconciliation,
     }
@@ -604,6 +740,8 @@ def write_logic_doc(data: dict[str, Any]) -> None:
 - 页面默认展示目标分析周期 `0601-0607`，不提供周期筛选；`0525-0531` 仅用于环比参照，`25年0601-0607` 仅用于同比参照。
 - 平台映射：前端展示 `淘宝闪购` 对应目标/预算表中的 `饿了么`；前端展示 `京东秒送` 对应目标/预算表中的 `京东到家`。
 - 区域字段：所有源表统一使用 `清洗_大区` 做区域匹配，使用脚本内置层级聚合为 `CBC`、`CIB`、`华中`、`NX`、`XJ`、`YN`。清洗后仍为空的记录保留在 `未识别`，不并入正式 BU。
+- 商品筛选字段：使用源表 `清洗_商品名`。网页默认展示全部商品，选择单个商品后，核心指标、Summary、区域表和下钻表按该商品重算。
+- 数据文件：脚本输出到 `public/data/dashboard-data.json`，网页运行时从 `/data/dashboard-data.json` 加载，避免把大体量商品明细打入前端代码包。
 
 ## 核心指标口径
 
@@ -643,6 +781,7 @@ def write_logic_doc(data: dict[str, Any]) -> None:
 - 渠道下钻：全量表按 `清洗_渠道` 统计 GMV，账单表按同字段补充活动 GMV 和促销费。
 - 品牌下钻：按 `清洗_品牌` 聚合。
 - 商户与商品下钻：每个平台、周期、区域保留 GMV Top 18，用于页面明细查看。
+- 商品筛选下的区域汇总：按 `清洗_大区 + 清洗_商品名` 聚合，目标/预算仍按平台、年月、BU区域匹配，用于观察该商品在对应区域目标与预算框架下的表现。
 - 活动名称下钻：按账单表活动名称聚合，输出 `核销金额`、`活动GMV`、`促销费比`、`活动ROI`、`核券量`。
 
 ## 校验
@@ -661,7 +800,10 @@ def write_logic_doc(data: dict[str, Any]) -> None:
 def main() -> None:
     data = build_data()
     OUTPUT_JSON.parent.mkdir(parents=True, exist_ok=True)
-    OUTPUT_JSON.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    OUTPUT_JSON.write_text(
+        json.dumps(data, ensure_ascii=False, separators=(",", ":")),
+        encoding="utf-8",
+    )
     write_logic_doc(data)
     print(f"Wrote {OUTPUT_JSON}")
     print(f"Wrote {LOGIC_DOC}")

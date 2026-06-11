@@ -1,7 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import dashboardData from "./data/dashboard-data.json";
+import { useEffect, useMemo, useState } from "react";
 
 type MetricRow = {
   platformId: string;
@@ -14,6 +13,7 @@ type MetricRow = {
   timeProgress?: number | null;
   region: string;
   parent: string;
+  product?: string;
   gmv: number;
   quantity?: number | null;
   orders?: number | null;
@@ -42,6 +42,7 @@ type ActivityRow = {
   periodKind: string;
   region: string;
   parent: string;
+  product?: string;
   activityName: string;
   redemptionAmount: number;
   activityGmv: number;
@@ -96,21 +97,28 @@ type DataShape = {
     regionOrder: string[];
     regionParent: Record<string, string>;
     regionGroups: Record<string, string[]>;
+    productOrder?: string[];
   };
   records: MetricRow[];
+  productRecords?: MetricRow[];
   breakdowns: {
     channels: BreakdownRow[];
+    channelsByProduct?: BreakdownRow[];
     brands: BreakdownRow[];
+    brandsByProduct?: BreakdownRow[];
     merchants: BreakdownRow[];
+    merchantsByProduct?: BreakdownRow[];
     products: BreakdownRow[];
     activities: ActivityRow[];
+    activitiesByProduct?: ActivityRow[];
   };
   reconciliation: Array<Record<string, string | number>>;
 };
 
-const data = dashboardData as DataShape;
 const PLATFORM_ALL = "all";
 const REGION_ALL = "all";
+const PRODUCT_ALL = "all";
+const DATA_URL = "/data/dashboard-data.json";
 const GROUP_ORDER = ["CBC", "CIB", "NX", "XJ", "YN", "华中", "未识别"];
 const EXCEL_REGION_ROWS = [
   "CBC-CQ",
@@ -134,12 +142,12 @@ function safeRatio(numerator: number, denominator: number): number | null {
   return denominator ? numerator / denominator : null;
 }
 
-function leavesFor(region: string): string[] {
+function leavesFor(data: DataShape, region: string): string[] {
   if (region === REGION_ALL || region === "总计") return data.metadata.regionOrder;
   return data.metadata.regionGroups[region] ?? [region];
 }
 
-function platformIds(platform: string): string[] {
+function platformIds(data: DataShape, platform: string): string[] {
   if (platform === PLATFORM_ALL) return data.metadata.platforms.map((item) => item.id);
   return [platform];
 }
@@ -224,15 +232,26 @@ function weightedUniquePlatformRatio(
   return values.reduce((sum, item) => sum + item.value * item.target, 0) / denominator;
 }
 
-function buildAggregate(periodId: string, platform: string, region: string): Aggregate {
-  const selectedLeaves = new Set(leavesFor(region));
-  const selectedPlatforms = new Set(platformIds(platform));
+function metricRowsForProduct(data: DataShape, product: string): MetricRow[] {
+  return product === PRODUCT_ALL ? data.records : data.productRecords ?? [];
+}
+
+function buildAggregate(
+  data: DataShape,
+  periodId: string,
+  platform: string,
+  region: string,
+  product = PRODUCT_ALL,
+): Aggregate {
+  const selectedLeaves = new Set(leavesFor(data, region));
+  const selectedPlatforms = new Set(platformIds(data, platform));
   return aggregateRows(
-    data.records.filter(
+    metricRowsForProduct(data, product).filter(
       (row) =>
         row.periodId === periodId &&
         selectedPlatforms.has(row.platformId) &&
-        selectedLeaves.has(row.region),
+        selectedLeaves.has(row.region) &&
+        (product === PRODUCT_ALL || row.product === product),
     ),
   );
 }
@@ -291,7 +310,7 @@ function trendTone(value: number | null | undefined, invert = false): string {
   return positive ? "good" : "bad";
 }
 
-function periodLabel(periodId: string): string {
+function periodLabel(data: DataShape, periodId: string): string {
   return data.metadata.periods.find((period) => period.id === periodId)?.label ?? periodId;
 }
 
@@ -299,7 +318,7 @@ function selectedRegionLabel(region: string): string {
   return region === REGION_ALL ? "全国/全区域" : region;
 }
 
-function periodMonthText(periodId: string): string {
+function periodMonthText(data: DataShape, periodId: string): string {
   const p = data.metadata.periods.find((item) => item.id === periodId);
   if (!p) return periodId;
   const year = p.start.startsWith("2025") ? "Y25" : "Y26";
@@ -309,7 +328,7 @@ function periodMonthText(periodId: string): string {
   return `${year} ${month}月(${start}-${end})`;
 }
 
-function regionTableNodes(region: string): string[] {
+function regionTableNodes(data: DataShape, region: string): string[] {
   if (region === REGION_ALL) return EXCEL_REGION_ROWS;
   const children = data.metadata.regionGroups[region];
   if (children && children.length > 1) return [...children, region];
@@ -364,6 +383,8 @@ type ComboChartRow = {
   label: string;
   bar: number | null;
   barLabel?: string;
+  bar2?: number | null;
+  bar2Label?: string;
   primary?: number | null;
   primaryLabel?: string;
   secondary?: number | null;
@@ -411,7 +432,7 @@ function chartLabel(label: string): string {
   return label.length > 7 ? `${label.slice(0, 7)}…` : label;
 }
 
-function buildScopeOptions(platform: string): ScopeOption[] {
+function buildScopeOptions(data: DataShape, platform: string): ScopeOption[] {
   if (platform === PLATFORM_ALL) {
     return [
       {
@@ -439,17 +460,11 @@ function promoTargetText(row: Aggregate): string {
   return `${diff >= 0 ? "高于目标" : "低于目标"} ${formatPointDistance(diff)}`;
 }
 
-function activityShareText(value: number | null): string {
-  if (value === null) return "活动GMV -";
-  if (value >= 0.6) return "促销依赖度高";
-  if (value >= 0.45) return "促销贡献偏高";
-  return "促销依赖度可控";
-}
-
 function ComboBarLineChart({
   title,
   rows,
   barName,
+  bar2Name,
   primaryName,
   secondaryName,
   barFormatter = formatMoney,
@@ -459,6 +474,7 @@ function ComboBarLineChart({
   title: string;
   rows: ComboChartRow[];
   barName: string;
+  bar2Name?: string;
   primaryName: string;
   secondaryName?: string;
   barFormatter?: (value: number | null | undefined) => string;
@@ -476,8 +492,9 @@ function ComboBarLineChart({
   const plotHeight = height - top - bottom;
   const plotBottom = top + plotHeight;
   const step = plotWidth / Math.max(chartRows.length, 1);
-  const barWidth = Math.max(14, Math.min(34, step * 0.46));
-  const barMax = niceAmountMax(chartRows.map((row) => row.bar));
+  const hasSecondBar = Boolean(bar2Name);
+  const barWidth = Math.max(10, Math.min(hasSecondBar ? 22 : 34, step * (hasSecondBar ? 0.28 : 0.46)));
+  const barMax = niceAmountMax(chartRows.flatMap((row) => [row.bar, row.bar2]));
   const computedLineMax =
     lineMax ??
     nicePercentMax(chartRows.flatMap((row) => [row.primary, row.secondary]), 1);
@@ -500,6 +517,7 @@ function ComboBarLineChart({
         <h3>{title}</h3>
         <div className="chart-legend">
           <span className="legend-bar">{barName}</span>
+          {bar2Name ? <span className="legend-bar-2">{bar2Name}</span> : null}
           <span className="legend-primary">{primaryName}</span>
           {secondaryName ? <span className="legend-secondary">{secondaryName}</span> : null}
         </div>
@@ -521,22 +539,47 @@ function ComboBarLineChart({
         })}
         {chartRows.map((row, index) => {
           const value = row.bar ?? 0;
+          const value2 = row.bar2 ?? 0;
           const x = xFor(index);
           const y = barY(value);
+          const y2 = barY(value2);
           const heightValue = plotBottom - y;
+          const heightValue2 = plotBottom - y2;
+          const firstBarX = x - (hasSecondBar ? barWidth + 2 : barWidth / 2);
+          const secondBarX = x + 2;
           return (
             <g key={`${row.label}-${index}`}>
               <rect
                 className="chart-bar"
-                x={x - barWidth / 2}
+                x={firstBarX}
                 y={y}
                 width={barWidth}
                 height={heightValue}
                 rx={3}
               />
-              <text className="chart-value-label bar-label" x={x} y={Math.max(top + 14, y - 8)} textAnchor="middle">
+              {hasSecondBar ? (
+                <rect
+                  className="chart-bar secondary-bar"
+                  x={secondBarX}
+                  y={y2}
+                  width={barWidth}
+                  height={heightValue2}
+                  rx={3}
+                />
+              ) : null}
+              <text
+                className="chart-value-label bar-label"
+                x={hasSecondBar ? firstBarX + barWidth / 2 : x}
+                y={Math.max(top + 14, y - 8)}
+                textAnchor="middle"
+              >
                 {row.barLabel ?? barFormatter(row.bar)}
               </text>
+              {hasSecondBar ? (
+                <text className="chart-value-label bar2-label" x={secondBarX + barWidth / 2} y={Math.max(top + 30, y2 - 8)} textAnchor="middle">
+                  {row.bar2Label ?? barFormatter(row.bar2)}
+                </text>
+              ) : null}
               <text
                 className="chart-x-label"
                 x={x}
@@ -690,6 +733,10 @@ function compareAggregate(current: Aggregate, baseline: Aggregate): number | nul
   return safeRatio(current.gmv - baseline.gmv, baseline.gmv);
 }
 
+function compareValue(current: number, baseline: number): number | null {
+  return safeRatio(current - baseline, baseline);
+}
+
 function promoRatioChange(current: Aggregate, baseline: Aggregate): number | null {
   if (current.promoFeeRatio === null || baseline.promoFeeRatio === null) return null;
   return current.promoFeeRatio - baseline.promoFeeRatio;
@@ -703,6 +750,7 @@ function collectBreakdown(
   periodId: string,
   selectedPlatforms: Set<string>,
   selectedLeaves: Set<string>,
+  selectedProduct = PRODUCT_ALL,
 ) {
   const grouped = new Map<string, MetricRow[]>();
   rows
@@ -710,7 +758,8 @@ function collectBreakdown(
       (row) =>
         row.periodId === periodId &&
         selectedPlatforms.has(row.platformId) &&
-        selectedLeaves.has(row.region),
+        selectedLeaves.has(row.region) &&
+        (selectedProduct === PRODUCT_ALL || row.product === selectedProduct),
     )
     .forEach((row) => {
       const name = String(row[key] ?? "未识别");
@@ -728,6 +777,7 @@ function collectActivities(
   periodId: string,
   selectedPlatforms: Set<string>,
   selectedLeaves: Set<string>,
+  selectedProduct = PRODUCT_ALL,
 ) {
   const grouped = new Map<
     string,
@@ -738,7 +788,8 @@ function collectActivities(
       (row) =>
         row.periodId === periodId &&
         selectedPlatforms.has(row.platformId) &&
-        selectedLeaves.has(row.region),
+        selectedLeaves.has(row.region) &&
+        (selectedProduct === PRODUCT_ALL || row.product === selectedProduct),
     )
     .forEach((row) => {
       const bucket = grouped.get(row.activityName) ?? {
@@ -914,20 +965,92 @@ function buildNarrative({
 }
 
 export default function Home() {
+  const [dashboardData, setDashboardData] = useState<DataShape | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch(DATA_URL)
+      .then((response) => {
+        if (!response.ok) throw new Error(`数据加载失败：${response.status}`);
+        return response.json() as Promise<DataShape>;
+      })
+      .then((payload) => {
+        if (!cancelled) setDashboardData(payload);
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) setLoadError(error instanceof Error ? error.message : "数据加载失败");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  if (loadError) {
+    return (
+      <main className="dashboard-shell">
+        <section className="loading-state">
+          <h1>嘉士伯淘京周报数据看板</h1>
+          <p>{loadError}</p>
+        </section>
+      </main>
+    );
+  }
+
+  if (!dashboardData) {
+    return (
+      <main className="dashboard-shell">
+        <section className="loading-state">
+          <h1>嘉士伯淘京周报数据看板</h1>
+          <p>正在加载数据...</p>
+        </section>
+      </main>
+    );
+  }
+
+  return <Dashboard data={dashboardData} />;
+}
+
+function Dashboard({ data }: { data: DataShape }) {
   const [platform, setPlatform] = useState(PLATFORM_ALL);
   const [region, setRegion] = useState(REGION_ALL);
+  const [product, setProduct] = useState(PRODUCT_ALL);
   const period = data.metadata.currentPeriodId;
 
-  const selectedLeaves = useMemo(() => new Set(leavesFor(region)), [region]);
-  const selectedPlatforms = useMemo(() => new Set(platformIds(platform)), [platform]);
-  const current = useMemo(() => buildAggregate(period, platform, region), [period, platform, region]);
+  const selectedLeaves = useMemo(() => new Set(leavesFor(data, region)), [data, region]);
+  const selectedPlatforms = useMemo(() => new Set(platformIds(data, platform)), [data, platform]);
+  const productOptions = useMemo(() => {
+    const available = new Set<string>();
+    (data.productRecords ?? []).forEach((row) => {
+      const productName = row.product?.trim();
+      if (
+        row.periodId === period &&
+        selectedPlatforms.has(row.platformId) &&
+        selectedLeaves.has(row.region) &&
+        productName &&
+        !["未识别", "nan", "None"].includes(productName)
+      ) {
+        available.add(productName);
+      }
+    });
+    const ordered = (data.metadata.productOrder ?? []).filter((item) => available.has(item));
+    const extras = Array.from(available)
+      .filter((item) => !ordered.includes(item))
+      .sort((a, b) => a.localeCompare(b, "zh-CN"));
+    return [...ordered, ...extras];
+  }, [data, period, selectedPlatforms, selectedLeaves]);
+
+  const effectiveProduct =
+    product === PRODUCT_ALL || productOptions.includes(product) ? product : PRODUCT_ALL;
+
+  const current = useMemo(() => buildAggregate(data, period, platform, region, effectiveProduct), [data, period, platform, region, effectiveProduct]);
   const previous = useMemo(
-    () => buildAggregate(data.metadata.previousPeriodId, platform, region),
-    [platform, region],
+    () => buildAggregate(data, data.metadata.previousPeriodId, platform, region, effectiveProduct),
+    [data, platform, region, effectiveProduct],
   );
   const lastYear = useMemo(
-    () => buildAggregate(data.metadata.lastYearPeriodId, platform, region),
-    [platform, region],
+    () => buildAggregate(data, data.metadata.lastYearPeriodId, platform, region, effectiveProduct),
+    [data, platform, region, effectiveProduct],
   );
 
   const comparisonEnabled = true;
@@ -937,98 +1060,123 @@ export default function Home() {
   const promoYoy = comparisonEnabled ? promoRatioChange(current, lastYear) : null;
 
   const regionRows = useMemo(() => {
-    return regionTableNodes(region).map((node) => {
-      const currentRow = buildAggregate(period, platform, node);
-      const previousRow = buildAggregate(data.metadata.previousPeriodId, platform, node);
-      const lastYearRow = buildAggregate(data.metadata.lastYearPeriodId, platform, node);
+    return regionTableNodes(data, region).map((node) => {
+      const currentRow = buildAggregate(data, period, platform, node, effectiveProduct);
+      const previousRow = buildAggregate(data, data.metadata.previousPeriodId, platform, node, effectiveProduct);
+      const lastYearRow = buildAggregate(data, data.metadata.lastYearPeriodId, platform, node, effectiveProduct);
       return { node, current: currentRow, previous: previousRow, lastYear: lastYearRow };
     });
-  }, [period, platform, region]);
+  }, [data, period, platform, region, effectiveProduct]);
+
+  const channelSourceRows = useMemo(
+    () => (effectiveProduct === PRODUCT_ALL ? data.breakdowns.channels : data.breakdowns.channelsByProduct ?? []),
+    [data, effectiveProduct],
+  );
+  const brandSourceRows = useMemo(
+    () => (effectiveProduct === PRODUCT_ALL ? data.breakdowns.brands : data.breakdowns.brandsByProduct ?? []),
+    [data, effectiveProduct],
+  );
+  const merchantSourceRows = useMemo(
+    () => (effectiveProduct === PRODUCT_ALL ? data.breakdowns.merchants : data.breakdowns.merchantsByProduct ?? []),
+    [data, effectiveProduct],
+  );
+  const activitySourceRows = useMemo(
+    () => (effectiveProduct === PRODUCT_ALL ? data.breakdowns.activities : data.breakdowns.activitiesByProduct ?? []),
+    [data, effectiveProduct],
+  );
 
   const channels = useMemo(
     () =>
       collectBreakdown(
-        data.breakdowns.channels,
+        channelSourceRows,
         "channel",
         period,
         selectedPlatforms,
         selectedLeaves,
+        effectiveProduct,
       ),
-    [period, selectedPlatforms, selectedLeaves],
+    [channelSourceRows, period, selectedPlatforms, selectedLeaves, effectiveProduct],
   );
   const previousChannels = useMemo(
     () =>
       collectBreakdown(
-        data.breakdowns.channels,
+        channelSourceRows,
         "channel",
         data.metadata.previousPeriodId,
         selectedPlatforms,
         selectedLeaves,
+        effectiveProduct,
       ),
-    [selectedPlatforms, selectedLeaves],
+    [channelSourceRows, data.metadata.previousPeriodId, selectedPlatforms, selectedLeaves, effectiveProduct],
   );
   const lastYearChannels = useMemo(
     () =>
       collectBreakdown(
-        data.breakdowns.channels,
+        channelSourceRows,
         "channel",
         data.metadata.lastYearPeriodId,
         selectedPlatforms,
         selectedLeaves,
+        effectiveProduct,
       ),
-    [selectedPlatforms, selectedLeaves],
+    [channelSourceRows, data.metadata.lastYearPeriodId, selectedPlatforms, selectedLeaves, effectiveProduct],
   );
   const brands = useMemo(
     () =>
-      collectBreakdown(data.breakdowns.brands, "brand", period, selectedPlatforms, selectedLeaves),
-    [period, selectedPlatforms, selectedLeaves],
+      collectBreakdown(brandSourceRows, "brand", period, selectedPlatforms, selectedLeaves, effectiveProduct),
+    [brandSourceRows, period, selectedPlatforms, selectedLeaves, effectiveProduct],
   );
   const merchants = useMemo(
     () =>
       collectBreakdown(
-        data.breakdowns.merchants,
+        merchantSourceRows,
         "merchant",
         period,
         selectedPlatforms,
         selectedLeaves,
+        effectiveProduct,
       ),
-    [period, selectedPlatforms, selectedLeaves],
+    [merchantSourceRows, period, selectedPlatforms, selectedLeaves, effectiveProduct],
   );
   const previousBrands = useMemo(
     () =>
       collectBreakdown(
-        data.breakdowns.brands,
+        brandSourceRows,
         "brand",
         data.metadata.previousPeriodId,
         selectedPlatforms,
         selectedLeaves,
+        effectiveProduct,
       ),
-    [selectedPlatforms, selectedLeaves],
+    [brandSourceRows, data.metadata.previousPeriodId, selectedPlatforms, selectedLeaves, effectiveProduct],
   );
   const lastYearBrands = useMemo(
     () =>
       collectBreakdown(
-        data.breakdowns.brands,
+        brandSourceRows,
         "brand",
         data.metadata.lastYearPeriodId,
         selectedPlatforms,
         selectedLeaves,
+        effectiveProduct,
       ),
-    [selectedPlatforms, selectedLeaves],
+    [brandSourceRows, data.metadata.lastYearPeriodId, selectedPlatforms, selectedLeaves, effectiveProduct],
   );
   const activities = useMemo(
-    () => collectActivities(data.breakdowns.activities, period, selectedPlatforms, selectedLeaves),
-    [period, selectedPlatforms, selectedLeaves],
+    () => collectActivities(activitySourceRows, period, selectedPlatforms, selectedLeaves, effectiveProduct),
+    [activitySourceRows, period, selectedPlatforms, selectedLeaves, effectiveProduct],
   );
-  const scopeOptions = useMemo(() => buildScopeOptions(platform), [platform]);
+  const scopeOptions = useMemo(() => buildScopeOptions(data, platform), [data, platform]);
   const coreMetricRows = useMemo(
     () =>
       scopeOptions.map((scope) => {
-        const row = buildAggregate(period, scope.platform, region);
-        const rowPrevious = buildAggregate(data.metadata.previousPeriodId, scope.platform, region);
-        const rowLastYear = buildAggregate(data.metadata.lastYearPeriodId, scope.platform, region);
+        const row = buildAggregate(data, period, scope.platform, region, effectiveProduct);
+        const rowPrevious = buildAggregate(data, data.metadata.previousPeriodId, scope.platform, region, effectiveProduct);
+        const rowLastYear = buildAggregate(data, data.metadata.lastYearPeriodId, scope.platform, region, effectiveProduct);
         const rowWow = comparisonEnabled ? compareAggregate(row, rowPrevious) : null;
         const rowYoy = comparisonEnabled ? compareAggregate(row, rowLastYear) : null;
+        const activityWow = comparisonEnabled ? compareValue(row.activityGmv, rowPrevious.activityGmv) : null;
+        const activityYoy = comparisonEnabled ? compareValue(row.activityGmv, rowLastYear.activityGmv) : null;
         const targetGap =
           row.targetAchievement !== null && row.timeProgress !== null
             ? row.targetAchievement - row.timeProgress
@@ -1058,22 +1206,22 @@ export default function Home() {
             tone: trendTone(targetGap) as "good" | "bad" | "neutral",
           },
           {
-            label: "活动GMV占比",
-            value: formatPercent(row.activityShare),
-            sub: activityShareText(row.activityShare),
-            tone: (row.activityShare ?? 0) >= 0.6 ? "warn" : "neutral",
+            label: "活动GMV",
+            value: formatMoney(row.activityGmv),
+            sub: `环比${formatDelta(activityWow)} 同比${formatDelta(activityYoy)}`,
+            tone: trendTone(activityWow) as "good" | "bad" | "neutral",
           },
         ];
         return { ...scope, metrics };
       }),
-    [comparisonEnabled, period, region, scopeOptions],
+    [comparisonEnabled, data, period, effectiveProduct, region, scopeOptions],
   );
   const summaryPanels = useMemo(
     () =>
       scopeOptions.map((scope) => {
-        const regionNodes = regionTableNodes(region).filter((node) => node !== "总计");
+        const regionNodes = regionTableNodes(data, region).filter((node) => node !== "总计");
         const regionSummaryRows = regionNodes.map((node) => {
-          const row = buildAggregate(period, scope.platform, node);
+          const row = buildAggregate(data, period, scope.platform, node, effectiveProduct);
           return {
             label: node,
             bar: row.gmv,
@@ -1085,30 +1233,33 @@ export default function Home() {
           };
         });
         const budgetSummaryRows = regionNodes.map((node) => {
-          const row = buildAggregate(period, scope.platform, node);
+          const row = buildAggregate(data, period, scope.platform, node, effectiveProduct);
           return {
             label: node,
-            bar: Math.max(row.promoBudgetRemaining ?? 0, 0),
-            barLabel: formatMoney(row.promoBudgetRemaining),
+            bar: row.subsidy,
+            barLabel: formatMoney(row.subsidy),
+            bar2: Math.max(row.promoBudgetRemaining ?? 0, 0),
+            bar2Label: formatMoney(row.promoBudgetRemaining),
             primary: row.promoBudgetUsage,
             primaryLabel: formatPercent(row.promoBudgetUsage, 0),
           };
         });
         const promoFeeRows = regionNodes.map((node) => {
-          const row = buildAggregate(period, scope.platform, node);
+          const row = buildAggregate(data, period, scope.platform, node, effectiveProduct);
           return {
             label: node,
             bar: row.promoFeeRatio,
             barLabel: formatPercent(row.promoFeeRatio),
           };
         });
-        const scopeAggregate = buildAggregate(period, scope.platform, region);
+        const scopeAggregate = buildAggregate(data, period, scope.platform, region, effectiveProduct);
         const channelRows = collectBreakdown(
-          data.breakdowns.channels,
+          effectiveProduct === PRODUCT_ALL ? data.breakdowns.channels : data.breakdowns.channelsByProduct ?? [],
           "channel",
           period,
-          new Set(platformIds(scope.platform)),
-          new Set(leavesFor(region)),
+          new Set(platformIds(data, scope.platform)),
+          new Set(leavesFor(data, region)),
+          effectiveProduct,
         )
           .slice(0, 8)
           .map((row) => ({
@@ -1128,12 +1279,15 @@ export default function Home() {
           promoFeeRows,
         };
       }),
-    [period, region, scopeOptions],
+    [data, period, effectiveProduct, region, scopeOptions],
   );
   const selectedPlatformLabel =
     platform === PLATFORM_ALL
       ? "双平台合并"
       : data.metadata.platforms.find((item) => item.id === platform)?.label ?? platform;
+  const selectedProductLabel = effectiveProduct === PRODUCT_ALL ? "全部商品" : effectiveProduct;
+  const selectedScopeLabel =
+    effectiveProduct === PRODUCT_ALL ? selectedPlatformLabel : `${selectedPlatformLabel} · ${selectedProductLabel}`;
 
   const narrative = useMemo(
     () =>
@@ -1141,7 +1295,7 @@ export default function Home() {
         current,
         previous,
         lastYear,
-        scopeLabel: selectedPlatformLabel,
+        scopeLabel: selectedScopeLabel,
         regionLabel: selectedRegionLabel(region),
         regionDrivers: regionRows,
         channels,
@@ -1152,7 +1306,7 @@ export default function Home() {
       current,
       previous,
       lastYear,
-      selectedPlatformLabel,
+      selectedScopeLabel,
       region,
       regionRows,
       channels,
@@ -1178,8 +1332,9 @@ export default function Home() {
           <p className="eyebrow">Carlsberg weekly retail BI</p>
           <h1>嘉士伯淘京周报数据看板</h1>
           <div className="header-meta">
-            <span>{periodLabel(period)}</span>
+            <span>{periodLabel(data, period)}</span>
             <span>{selectedRegionLabel(region)}</span>
+            <span>{selectedProductLabel}</span>
             <span>数据生成 {generated}</span>
           </div>
         </div>
@@ -1215,6 +1370,17 @@ export default function Home() {
             ))}
           </select>
         </div>
+        <div className="control-group compact product-control">
+          <label htmlFor="product-select">商品名</label>
+          <select id="product-select" value={effectiveProduct} onChange={(event) => setProduct(event.target.value)}>
+            <option value={PRODUCT_ALL}>全部商品</option>
+            {productOptions.map((item) => (
+              <option value={item} key={item}>
+                {item}
+              </option>
+            ))}
+          </select>
+        </div>
       </section>
 
       <section className="core-matrix">
@@ -1234,7 +1400,7 @@ export default function Home() {
       </section>
 
       <section className="diagnostic-section">
-        <Panel title="AI诊断报告" kicker={`${selectedPlatformLabel} · ${selectedRegionLabel(region)} · ${periodLabel(period)}`}>
+        <Panel title="AI诊断报告" kicker={`${selectedScopeLabel} · ${selectedRegionLabel(region)} · ${periodLabel(data, period)}`}>
           <div className="diagnostic-grid">
             <article className="diagnostic-card">
               <h3>结论</h3>
@@ -1271,7 +1437,7 @@ export default function Home() {
               <div className="summary-scope" key={scope.id}>
                 <div className="summary-scope-title">
                   <span>{scope.label}</span>
-                  <small>{periodLabel(period)} · {selectedRegionLabel(region)}</small>
+                  <small>{periodLabel(data, period)} · {selectedRegionLabel(region)} · {selectedProductLabel}</small>
                 </div>
                 <div className="summary-chart-grid">
                   <ComboBarLineChart
@@ -1282,19 +1448,20 @@ export default function Home() {
                     secondaryName="时间进度"
                   />
                   <ComboBarLineChart
-                    title={`${scope.label}-区域预算使用情况`}
-                    rows={scope.budgetSummaryRows}
-                    barName="促销预算剩余金额"
-                    primaryName="促销预算使用率"
-                    lineMax={1}
-                  />
-                  <ComboBarLineChart
                     title={`${scope.label}-渠道GMV分布`}
                     rows={scope.channelRows}
                     barName="全量GMV"
                     primaryName="全量GMV占比"
                     secondaryName="时间进度"
                     lineMax={nicePercentMax(scope.channelRows.flatMap((row) => [row.primary, row.secondary]), 0.6)}
+                  />
+                  <ComboBarLineChart
+                    title={`${scope.label}-区域预算使用情况`}
+                    rows={scope.budgetSummaryRows}
+                    barName="已使用预算金额"
+                    bar2Name="剩余预算金额"
+                    primaryName="促销预算使用率"
+                    lineMax={1}
                   />
                   <SimpleBarChart
                     title={`${scope.label}-区域促销费比`}
@@ -1334,7 +1501,7 @@ export default function Home() {
               </thead>
               <tbody>
                 <tr>
-                  <td>{periodMonthText(period)}</td>
+                  <td>{periodMonthText(data, period)}</td>
                   <td>{formatPercent(current.timeProgress)}</td>
                   <td>{formatMoney(current.gmv)}</td>
                   <td>{formatPercent(current.targetAchievement)}</td>
@@ -1360,8 +1527,8 @@ export default function Home() {
               <thead>
                 <tr>
                   <th rowSpan={2}>区域</th>
-                  <th colSpan={5}>MTD（{periodLabel(period).replace("WTD ", "")}）</th>
-                  <th colSpan={7}>WTD（{periodLabel(period).replace("WTD ", "")}）</th>
+                  <th colSpan={5}>MTD（{periodLabel(data, period).replace("WTD ", "")}）</th>
+                  <th colSpan={7}>WTD（{periodLabel(data, period).replace("WTD ", "")}）</th>
                 </tr>
                 <tr>
                   <th>全量GMV</th>
@@ -1412,7 +1579,7 @@ export default function Home() {
       </section>
 
       <section className="detail-grid">
-        <Panel title="嘉士伯渠道" kicker={`WTD（${periodLabel(period).replace("WTD ", "")}）`}>
+        <Panel title="嘉士伯渠道" kicker={`WTD（${periodLabel(data, period).replace("WTD ", "")}）`}>
           <div className="table-scroll">
             <table className="metric-table">
               <thead>
@@ -1459,7 +1626,7 @@ export default function Home() {
       </section>
 
       <section className="detail-grid">
-        <Panel title="品牌" kicker={`GMV表现（${periodLabel(period).replace("WTD ", "")}）`}>
+        <Panel title="品牌" kicker={`GMV表现（${periodLabel(data, period).replace("WTD ", "")}）`}>
           <div className="table-scroll">
             <table className="metric-table">
               <thead>
@@ -1500,7 +1667,7 @@ export default function Home() {
       </section>
 
       <section className="detail-grid">
-        <Panel title="活动名称" kicker={`WTD（${periodLabel(period).replace("WTD ", "")}）`}>
+        <Panel title="活动名称" kicker={`WTD（${periodLabel(data, period).replace("WTD ", "")}）`}>
           <div className="table-scroll">
             <table className="metric-table">
               <thead>

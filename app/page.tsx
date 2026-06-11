@@ -437,6 +437,15 @@ function selectedRegionLabel(region: string): string {
   return region === REGION_ALL ? "全国/全区域" : region;
 }
 
+function isOneLiterProduct(product: string): boolean {
+  if (product === PRODUCT_ALL) return false;
+  const normalized = product.replace(/\s+/g, "");
+  return (
+    /一升/.test(normalized) ||
+    /(^|[^0-9.０-９．])(?:1|１)(?:l|ｌ|Ｌ|升)(?![0-9.０-９．])/i.test(normalized)
+  );
+}
+
 function periodMonthText(data: DataShape, periodId: string): string {
   const p = data.metadata.periods.find((item) => item.id === periodId);
   if (!p) return periodId;
@@ -973,6 +982,7 @@ function buildNarrative({
   activities,
   skuRows,
   productLabel,
+  includeTargetBudget,
 }: {
   current: Aggregate;
   previous: Aggregate;
@@ -993,13 +1003,20 @@ function buildNarrative({
   }>;
   skuRows: Array<{ name: string } & Aggregate>;
   productLabel: string;
+  includeTargetBudget: boolean;
 }) {
   const wow = compareAggregate(current, previous);
   const yoy = compareAggregate(current, lastYear);
-  const targetGap = (current.targetAchievement ?? 0) - (current.timeProgress ?? 0);
-  const budgetPressure = (current.promoBudgetUsage ?? 0) - (current.timeProgress ?? 0);
+  const targetGap = includeTargetBudget
+    ? (current.targetAchievement ?? 0) - (current.timeProgress ?? 0)
+    : null;
+  const budgetPressure = includeTargetBudget
+    ? (current.promoBudgetUsage ?? 0) - (current.timeProgress ?? 0)
+    : null;
   const targetGmvGap =
-    current.target && current.timeProgress !== null ? current.target * current.timeProgress - current.gmv : null;
+    includeTargetBudget && current.target && current.timeProgress !== null
+      ? current.target * current.timeProgress - current.gmv
+      : null;
   const topDriver = regionDrivers
     .filter((item) => item.node !== "总计")
     .map((item) => ({
@@ -1017,13 +1034,15 @@ function buildNarrative({
   const highFeeRegion = regionDrivers
     .filter((item) => item.node !== "总计" && item.current.gmv > current.gmv * 0.01)
     .sort((a, b) => (b.current.promoFeeRatio ?? 0) - (a.current.promoFeeRatio ?? 0))[0];
-  const fastBudgetRegion = regionDrivers
-    .filter((item) => item.node !== "总计" && item.current.promoBudgetUsage !== null)
-    .sort((a, b) => {
-      const aGap = (a.current.promoBudgetUsage ?? 0) - (a.current.timeProgress ?? 0);
-      const bGap = (b.current.promoBudgetUsage ?? 0) - (b.current.timeProgress ?? 0);
-      return bGap - aGap;
-    })[0];
+  const fastBudgetRegion = includeTargetBudget
+    ? regionDrivers
+        .filter((item) => item.node !== "总计" && item.current.promoBudgetUsage !== null)
+        .sort((a, b) => {
+          const aGap = (a.current.promoBudgetUsage ?? 0) - (a.current.timeProgress ?? 0);
+          const bGap = (b.current.promoBudgetUsage ?? 0) - (b.current.timeProgress ?? 0);
+          return bGap - aGap;
+        })[0]
+    : undefined;
   const topChannel = channels[0];
   const topBrand = brands[0];
   const topBrandsShare = brands
@@ -1058,7 +1077,7 @@ function buildNarrative({
     .filter((item) => item.gmv > current.gmv * 0.01)
     .sort((a, b) => (b.promoFeeRatio ?? 0) - (a.promoFeeRatio ?? 0))[0];
   const feeRisk =
-    current.targetPromoFeeRatio !== null && current.promoFeeRatio !== null
+    includeTargetBudget && current.targetPromoFeeRatio !== null && current.promoFeeRatio !== null
       ? current.promoFeeRatio - current.targetPromoFeeRatio
       : null;
   const activityDependence = current.activityShare ?? null;
@@ -1068,12 +1087,14 @@ function buildNarrative({
     highFeeChannel?.name ?? (regionLabel === "全国/全区域" ? "高费比BU/系统" : regionLabel);
   const activityRiskTarget = highActivityChannel?.name ?? topChannel?.name ?? "活动渠道";
   const reportScope = `${scopeLabel} · ${regionLabel}`;
+  const targetGapValue = targetGap ?? 0;
+  const budgetPressureValue = budgetPressure ?? 0;
   const targetAchievementGap =
-    current.targetAchievement !== null && current.timeProgress !== null
+    includeTargetBudget && current.targetAchievement !== null && current.timeProgress !== null
       ? current.timeProgress - current.targetAchievement
       : null;
   const nextTargetAchievement =
-    current.targetAchievement !== null
+    includeTargetBudget && current.targetAchievement !== null
       ? current.targetAchievement + Math.max(0.02, Math.min(0.08, Math.max(targetAchievementGap ?? 0, 0)))
       : null;
   const nextFeeTarget =
@@ -1083,12 +1104,20 @@ function buildNarrative({
   const nextActivityShareTarget =
     current.activityShare !== null ? Math.min(current.activityShare, 0.6) : null;
 
-  const conclusions = [
-    `${reportScope}目标分析周期全量GMV ${formatMoney(current.gmv)}，环比${formatDelta(wow)}，同比${formatDelta(yoy)}。`,
-    `GMV目标达成率 ${formatPercent(current.targetAchievement)}，时间进度 ${formatPercent(current.timeProgress)}，${targetGap >= 0 ? "领先" : "落后"}时间进度 ${formatPointDistance(targetGap)}${targetGmvGap !== null && targetGmvGap > 0 ? `，折算需补 ${formatMoney(targetGmvGap)} GMV` : ""}。`,
-    `实际促销费比 ${formatPercent(current.promoFeeRatio)}，${feeRisk !== null ? `${feeRisk >= 0 ? "高于" : "低于"}目标 ${formatPointDistance(feeRisk)}` : "目标费比缺失"}；活动GMV占比 ${formatPercent(current.activityShare)}，${activityRiskLevel === "high" ? "促销依赖偏高" : activityRiskLevel === "watch" ? "需观察自然增长承接" : "活动依赖相对可控"}。`,
-    `促销预算使用率 ${formatPercent(current.promoBudgetUsage)}，${budgetPressure >= 0 ? "快于" : "慢于"}时间进度 ${formatPointDistance(budgetPressure)}；${fastBudgetRegion ? `${fastBudgetRegion.node}预算使用率 ${formatPercent(fastBudgetRegion.current.promoBudgetUsage)} 是重点观察对象` : "当前范围暂无可下钻预算节点"}。`,
-  ];
+  const conclusions = includeTargetBudget
+    ? [
+        `${reportScope}目标分析周期全量GMV ${formatMoney(current.gmv)}，环比${formatDelta(wow)}，同比${formatDelta(yoy)}。`,
+        `GMV目标达成率 ${formatPercent(current.targetAchievement)}，时间进度 ${formatPercent(current.timeProgress)}，${targetGapValue >= 0 ? "领先" : "落后"}时间进度 ${formatPointDistance(targetGapValue)}${targetGmvGap !== null && targetGmvGap > 0 ? `，折算需补 ${formatMoney(targetGmvGap)} GMV` : ""}。`,
+        `实际促销费比 ${formatPercent(current.promoFeeRatio)}，${feeRisk !== null ? `${feeRisk >= 0 ? "高于" : "低于"}目标 ${formatPointDistance(feeRisk)}` : "目标费比缺失"}；活动GMV占比 ${formatPercent(current.activityShare)}，${activityRiskLevel === "high" ? "促销依赖偏高" : activityRiskLevel === "watch" ? "需观察自然增长承接" : "活动依赖相对可控"}。`,
+        `促销预算使用率 ${formatPercent(current.promoBudgetUsage)}，${budgetPressureValue >= 0 ? "快于" : "慢于"}时间进度 ${formatPointDistance(budgetPressureValue)}；${fastBudgetRegion ? `${fastBudgetRegion.node}预算使用率 ${formatPercent(fastBudgetRegion.current.promoBudgetUsage)} 是重点观察对象` : "当前范围暂无可下钻预算节点"}。`,
+      ]
+    : [
+        `${reportScope}当前周期全量GMV ${formatMoney(current.gmv)}，环比${formatDelta(wow)}，同比${formatDelta(yoy)}。`,
+        `实际促销费比 ${formatPercent(current.promoFeeRatio)}，活动GMV占比 ${formatPercent(current.activityShare)}，${activityRiskLevel === "high" ? "促销依赖偏高" : activityRiskLevel === "watch" ? "需观察自然增长承接" : "活动依赖相对可控"}。`,
+        topDriver
+          ? `${topDriver.node}贡献最大环比增量 ${formatMoney(topDriver.inc)}；${weakDriver ? `${weakDriver.node}环比变化 ${formatMoney(weakDriver.inc)}，是拖累或低增节点。` : ""}`
+          : `${reportScope}没有可拆分的区域增量节点，当前诊断以整体GMV ${formatMoney(current.gmv)} 和费比 ${formatPercent(current.promoFeeRatio)} 为主。`,
+      ];
 
   const analysis = [
     topDriver
@@ -1109,48 +1138,83 @@ function buildNarrative({
     topSku
       ? `${productLabel} SKU 中 ${topSku.name} GMV ${formatMoney(topSku.gmv)}、占当前范围 ${formatPercent(safeRatio(topSku.gmv, current.gmv))}；${efficientSku ? `${efficientSku.name}费比 ${formatPercent(efficientSku.promoFeeRatio)}，可作为费用效率参照。` : ""}`
       : `${productLabel} 未命中可展示 SKU，产品维度暂不输出单品动作。`,
-    flagshipShare !== null
-      ? flagshipTargetGap !== null && flagshipTargetGap > 0
-        ? `官旗/酒小二相关商户GMV占比 ${formatPercent(flagshipShare)}，距离30%目标仍差 ${formatPointDistance(flagshipTargetGap)}；若占比继续下滑，核心矛盾更可能在供给和拓店，而非继续加促销费。`
-        : `官旗/酒小二相关商户GMV占比 ${formatPercent(flagshipShare)}，已达到或超过30%目标；后续重点是稳住供给和专人运营，避免服务商定制品下线再次拖累占比。`
-      : `${reportScope}商户数据无法识别官旗/酒小二，无法核算30%官旗目标差距。`,
+    includeTargetBudget
+      ? flagshipShare !== null
+        ? flagshipTargetGap !== null && flagshipTargetGap > 0
+          ? `官旗/酒小二相关商户GMV占比 ${formatPercent(flagshipShare)}，距离30%目标仍差 ${formatPointDistance(flagshipTargetGap)}；若占比继续下滑，核心矛盾更可能在供给和拓店，而非继续加促销费。`
+          : `官旗/酒小二相关商户GMV占比 ${formatPercent(flagshipShare)}，已达到或超过30%目标；后续重点是稳住供给和专人运营，避免服务商定制品下线再次拖累占比。`
+        : `${reportScope}商户数据无法识别官旗/酒小二，无法核算30%官旗目标差距。`
+      : flagshipShare !== null
+        ? `官旗/酒小二相关商户GMV占比 ${formatPercent(flagshipShare)}；若占比继续下滑，核心矛盾更可能在供给和拓店，而非继续加促销费。`
+        : `${reportScope}商户数据无法识别官旗/酒小二，当前以渠道、品牌、SKU 和活动结构判断为主。`,
   ];
 
-  const actions = [
-    feeRisk !== null && feeRisk > 0
-      ? `控费比：${reportScope}费比高于目标 ${formatPointDistance(feeRisk)}，先处理${feeRiskTarget}；按“下线活动、剔除高费低效品、券熔断、改门槛”顺序执行，若全国活动不能单区下线，则对${fastBudgetRegion?.node ?? regionLabel}追加区域预算。`
-      : `稳费比：${reportScope}费比未高于目标，保留当前机制；下周继续盯${fastBudgetRegion?.node ?? regionLabel}预算使用率 ${formatPercent(fastBudgetRegion?.current.promoBudgetUsage ?? current.promoBudgetUsage)}。`,
-    activityRiskLevel === "high"
-      ? `降依赖：${activityRiskTarget}活动GMV占比 ${formatPercent(highActivityChannel?.activityShare ?? current.activityShare)}，减少纯补贴放量，改为加品、换品和门槛优化，目标是把整体活动GMV占比从 ${formatPercent(current.activityShare)} 拉回60%以内。`
-      : `促增长：活动GMV占比 ${formatPercent(current.activityShare)} 未超过70%高风险线，优先把资源投向${topChannel?.name ?? "最高GMV渠道"}，该渠道GMV ${formatMoney(topChannel?.gmv ?? current.gmv)}、费比 ${formatPercent(topChannel?.promoFeeRatio ?? current.promoFeeRatio)}。`,
-    lowEfficiencyActivity
-      ? `调机制：先复盘 ${lowEfficiencyActivity.activityName}，若下周 ROI 仍低于 ${formatRoi(2)} 或费比仍高于 ${formatPercent(nextFeeTarget)}，停止该机制或改为满减门槛券；目标是释放 ${formatMoney(lowEfficiencyActivity.redemptionAmount * 0.3)} 以上促销费。`
-      : `调机制：本周未出现明确低效活动，保留活动池但设置机制熔断线：活动ROI低于 ${formatRoi(2)} 且费比高于 ${formatPercent(nextFeeTarget)} 时停止投放。`,
-    longTailBrand
-      ? `看结构：${longTailBrand.name}在Top4之外贡献 ${formatMoney(longTailBrand.gmv)}、占比 ${formatPercent(safeRatio(longTailBrand.gmv, current.gmv))}，下周对比竞品大单品满减和IP合作，判断是否侵蚀${topBrand?.name ?? "头部品牌"}。`
-      : `看结构：当前Top4品牌占比 ${formatPercent(topBrandsShare)}，未识别到GMV超过1%的长尾品牌；下周重点看${topBrand?.name ?? "头部品牌"}是否继续集中。`,
-    flagshipShare === null
-      ? `补标签：当前范围无法识别官旗/酒小二GMV，先补齐旗舰店、官方、自营、酒小二商户标签，再判断30%官旗目标差距。`
-      : flagshipTargetGap !== null && flagshipTargetGap > 0
-        ? `补官旗：官旗/酒小二占比 ${formatPercent(flagshipShare)}，距离30%目标差 ${formatPointDistance(flagshipTargetGap)}，优先推动拓店和供给恢复，而不是继续抬费比；重点跟进酒小二/旗舰店供给缺口。`
-      : `固官旗：官旗/酒小二占比 ${formatPercent(flagshipShare)} 已接近或达到30%目标，保持专人运营与拓店协同，避免服务商定制品下线再次拖累占比。`,
-  ];
+  const actions = includeTargetBudget
+    ? [
+        feeRisk !== null && feeRisk > 0
+          ? `控费比：${reportScope}费比高于目标 ${formatPointDistance(feeRisk)}，先处理${feeRiskTarget}；按“下线活动、剔除高费低效品、券熔断、改门槛”顺序执行，若全国活动不能单区下线，则对${fastBudgetRegion?.node ?? regionLabel}追加区域预算。`
+          : `稳费比：${reportScope}费比未高于目标，保留当前机制；下周继续盯${fastBudgetRegion?.node ?? regionLabel}预算使用率 ${formatPercent(fastBudgetRegion?.current.promoBudgetUsage ?? current.promoBudgetUsage)}。`,
+        activityRiskLevel === "high"
+          ? `降依赖：${activityRiskTarget}活动GMV占比 ${formatPercent(highActivityChannel?.activityShare ?? current.activityShare)}，减少纯补贴放量，改为加品、换品和门槛优化，目标是把整体活动GMV占比从 ${formatPercent(current.activityShare)} 拉回60%以内。`
+          : `促增长：活动GMV占比 ${formatPercent(current.activityShare)} 未超过70%高风险线，优先把资源投向${topChannel?.name ?? "最高GMV渠道"}，该渠道GMV ${formatMoney(topChannel?.gmv ?? current.gmv)}、费比 ${formatPercent(topChannel?.promoFeeRatio ?? current.promoFeeRatio)}。`,
+        lowEfficiencyActivity
+          ? `调机制：先复盘 ${lowEfficiencyActivity.activityName}，若下周 ROI 仍低于 ${formatRoi(2)} 或费比仍高于 ${formatPercent(nextFeeTarget)}，停止该机制或改为满减门槛券；目标是释放 ${formatMoney(lowEfficiencyActivity.redemptionAmount * 0.3)} 以上促销费。`
+          : `调机制：本周未出现明确低效活动，保留活动池但设置机制熔断线：活动ROI低于 ${formatRoi(2)} 且费比高于 ${formatPercent(nextFeeTarget)} 时停止投放。`,
+        longTailBrand
+          ? `看结构：${longTailBrand.name}在Top4之外贡献 ${formatMoney(longTailBrand.gmv)}、占比 ${formatPercent(safeRatio(longTailBrand.gmv, current.gmv))}，下周对比竞品大单品满减和IP合作，判断是否侵蚀${topBrand?.name ?? "头部品牌"}。`
+          : `看结构：当前Top4品牌占比 ${formatPercent(topBrandsShare)}，未识别到GMV超过1%的长尾品牌；下周重点看${topBrand?.name ?? "头部品牌"}是否继续集中。`,
+        flagshipShare === null
+          ? `补标签：当前范围无法识别官旗/酒小二GMV，先补齐旗舰店、官方、自营、酒小二商户标签，再判断30%官旗目标差距。`
+          : flagshipTargetGap !== null && flagshipTargetGap > 0
+            ? `补官旗：官旗/酒小二占比 ${formatPercent(flagshipShare)}，距离30%目标差 ${formatPointDistance(flagshipTargetGap)}，优先推动拓店和供给恢复，而不是继续抬费比；重点跟进酒小二/旗舰店供给缺口。`
+            : `固官旗：官旗/酒小二占比 ${formatPercent(flagshipShare)} 已接近或达到30%目标，保持专人运营与拓店协同，避免服务商定制品下线再次拖累占比。`,
+      ]
+    : [
+        activityRiskLevel === "high"
+          ? `降依赖：${activityRiskTarget}活动GMV占比 ${formatPercent(highActivityChannel?.activityShare ?? current.activityShare)}，减少纯补贴放量，改为加品、换品和门槛优化，把整体活动GMV占比控制在60%以内。`
+          : `促增长：活动GMV占比 ${formatPercent(current.activityShare)} 未超过70%高风险线，优先把资源投向${topChannel?.name ?? "最高GMV渠道"}，该渠道GMV ${formatMoney(topChannel?.gmv ?? current.gmv)}、费比 ${formatPercent(topChannel?.promoFeeRatio ?? current.promoFeeRatio)}。`,
+        lowEfficiencyActivity
+          ? `调机制：先复盘 ${lowEfficiencyActivity.activityName}，若下周 ROI 仍低于 ${formatRoi(2)} 或费比仍高于 ${formatPercent(nextFeeTarget)}，停止该机制或改为满减门槛券。`
+          : `调机制：本周未出现明确低效活动，保留活动池但设置机制熔断线：活动ROI低于 ${formatRoi(2)} 且费比高于 ${formatPercent(nextFeeTarget)} 时停止投放。`,
+        longTailBrand
+          ? `看结构：${longTailBrand.name}在Top4之外贡献 ${formatMoney(longTailBrand.gmv)}、占比 ${formatPercent(safeRatio(longTailBrand.gmv, current.gmv))}，下周对比竞品大单品满减和IP合作，判断是否侵蚀${topBrand?.name ?? "头部品牌"}。`
+          : `看结构：当前Top4品牌占比 ${formatPercent(topBrandsShare)}，未识别到GMV超过1%的长尾品牌；下周重点看${topBrand?.name ?? "头部品牌"}是否继续集中。`,
+        flagshipShare === null
+          ? `补标签：当前范围无法识别官旗/酒小二GMV，先补齐旗舰店、官方、自营、酒小二商户标签，再回看商户结构。`
+          : `看官旗：官旗/酒小二占比 ${formatPercent(flagshipShare)}，优先推动拓店和供给恢复，而不是继续抬费比；重点跟进酒小二/旗舰店供给缺口。`,
+      ];
 
-  const playbook = [
-    highFeeRegion
-      ? `区域控费：${highFeeRegion.node}当前促销费比 ${formatPercent(highFeeRegion.current.promoFeeRatio)}，下周目标压到 ${formatPercent(nextFeeTarget)} 以内；动作顺序为停低ROI活动、剔除高费SKU、提高券门槛，执行后看GMV是否仍高于 ${formatMoney(highFeeRegion.current.gmv * 0.95)}。`
-      : `区域控费：当前没有明显高费比区域，统一设置费比红线 ${formatPercent(nextFeeTarget)}，超过红线先停低ROI机制。`,
-    weakDriver
-      ? `区域追量：${weakDriver.node}环比变化 ${formatMoney(weakDriver.inc)}，下周目标至少追回 ${formatMoney(Math.abs(Math.min(weakDriver.inc, 0)) * 0.5 || current.gmv * 0.03)}；复制${topDriver?.node ?? "高增区域"}的高GMV渠道动作，先补货和曝光，再追加券。`
-      : `区域追量：当前区域没有可拆分弱项，目标达成率下周提升到 ${formatPercent(nextTargetAchievement)}；动作优先级为高GMV渠道加品、核心SKU补供给、预算向高ROI活动集中。`,
-    fastBudgetRegion
-      ? `预算节奏：${fastBudgetRegion.node}预算使用率 ${formatPercent(fastBudgetRegion.current.promoBudgetUsage)}，目标控制在时间进度 +5pp 内；若全国活动不能区域下线，则单独限制${fastBudgetRegion.node}高费SKU券包。`
-      : `预算节奏：当前预算使用率 ${formatPercent(current.promoBudgetUsage)}，下周目标不高于时间进度 +5pp；预算只投GMV占比前3渠道和ROI达标机制。`,
-    topSku
-      ? `产品动作：${topSku.name}是${productLabel}第一SKU，保持主推；${highFeeSku ? `${highFeeSku.name}费比 ${formatPercent(highFeeSku.promoFeeRatio)}，若GMV占比仅 ${formatPercent(safeRatio(highFeeSku.gmv, current.gmv))} 且费比高于整体 ${formatPercent(current.promoFeeRatio)}，下周从券包中剔除。` : `下周继续补齐${productLabel} SKU 标签，保证核心单品表能追踪全部SKU。`}`
-      : `产品动作：当前筛选未命中核心单品SKU，先补充 SKU 命名规则，再进入产品维度 playbook。`,
-    `结果目标：下周复盘必须同时看三条线，GMV目标达成率提升到 ${formatPercent(nextTargetAchievement)}、促销费比不高于 ${formatPercent(nextFeeTarget)}、活动GMV占比不高于 ${formatPercent(nextActivityShareTarget)}。`,
-  ];
+  const playbook = includeTargetBudget
+    ? [
+        highFeeRegion
+          ? `区域控费：${highFeeRegion.node}当前促销费比 ${formatPercent(highFeeRegion.current.promoFeeRatio)}，下周目标压到 ${formatPercent(nextFeeTarget)} 以内；动作顺序为停低ROI活动、剔除高费SKU、提高券门槛，执行后看GMV是否仍高于 ${formatMoney(highFeeRegion.current.gmv * 0.95)}。`
+          : `区域控费：当前没有明显高费比区域，统一设置费比红线 ${formatPercent(nextFeeTarget)}，超过红线先停低ROI机制。`,
+        weakDriver
+          ? `区域追量：${weakDriver.node}环比变化 ${formatMoney(weakDriver.inc)}，下周目标至少追回 ${formatMoney(Math.abs(Math.min(weakDriver.inc, 0)) * 0.5 || current.gmv * 0.03)}；复制${topDriver?.node ?? "高增区域"}的高GMV渠道动作，先补货和曝光，再追加券。`
+          : `区域追量：当前区域没有可拆分弱项，目标达成率下周提升到 ${formatPercent(nextTargetAchievement)}；动作优先级为高GMV渠道加品、核心SKU补供给、预算向高ROI活动集中。`,
+        fastBudgetRegion
+          ? `预算节奏：${fastBudgetRegion.node}预算使用率 ${formatPercent(fastBudgetRegion.current.promoBudgetUsage)}，目标控制在时间进度 +5pp 内；若全国活动不能区域下线，则单独限制${fastBudgetRegion.node}高费SKU券包。`
+          : `预算节奏：当前预算使用率 ${formatPercent(current.promoBudgetUsage)}，下周目标不高于时间进度 +5pp；预算只投GMV占比前3渠道和ROI达标机制。`,
+        topSku
+          ? `产品动作：${topSku.name}是${productLabel}第一SKU，保持主推；${highFeeSku ? `${highFeeSku.name}费比 ${formatPercent(highFeeSku.promoFeeRatio)}，若GMV占比仅 ${formatPercent(safeRatio(highFeeSku.gmv, current.gmv))} 且费比高于整体 ${formatPercent(current.promoFeeRatio)}，下周从券包中剔除。` : `下周继续补齐${productLabel} SKU 标签，保证核心单品表能追踪全部SKU。`}`
+          : `产品动作：当前筛选未命中核心单品SKU，先补充 SKU 命名规则，再进入产品维度 playbook。`,
+        `结果目标：下周复盘必须同时看三条线，GMV目标达成率提升到 ${formatPercent(nextTargetAchievement)}、促销费比不高于 ${formatPercent(nextFeeTarget)}、活动GMV占比不高于 ${formatPercent(nextActivityShareTarget)}。`,
+      ]
+    : [
+        highFeeRegion
+          ? `区域控费：${highFeeRegion.node}当前促销费比 ${formatPercent(highFeeRegion.current.promoFeeRatio)}，下周压到 ${formatPercent(nextFeeTarget)} 以内；动作顺序为停低ROI活动、剔除高费SKU、提高券门槛，执行后看GMV是否仍高于 ${formatMoney(highFeeRegion.current.gmv * 0.95)}。`
+          : `区域控费：当前没有明显高费比区域，统一设置费比红线 ${formatPercent(nextFeeTarget)}，超过红线先停低ROI机制。`,
+        weakDriver
+          ? `区域追量：${weakDriver.node}环比变化 ${formatMoney(weakDriver.inc)}，优先追回 ${formatMoney(Math.abs(Math.min(weakDriver.inc, 0)) * 0.5 || current.gmv * 0.03)}；复制${topDriver?.node ?? "高增区域"}的高GMV渠道动作，先补货和曝光，再追加券。`
+          : `区域追量：当前区域没有可拆分弱项；动作优先级为高GMV渠道加品、核心SKU补供给、资源向高ROI活动集中。`,
+        lowEfficiencyActivity
+          ? `机制节奏：${lowEfficiencyActivity.activityName} 当前 ROI ${formatRoi(lowEfficiencyActivity.activityRoi)}、费比 ${formatPercent(lowEfficiencyActivity.promoFeeRatio)}，先改门槛或停投，再观察GMV承接。`
+          : `机制节奏：当前没有明显低效活动，继续按活动ROI和费比排序处理。`,
+        topSku
+          ? `产品动作：${topSku.name}是${productLabel}第一SKU，保持主推；${highFeeSku ? `${highFeeSku.name}费比 ${formatPercent(highFeeSku.promoFeeRatio)}，若GMV占比仅 ${formatPercent(safeRatio(highFeeSku.gmv, current.gmv))} 且费比高于整体 ${formatPercent(current.promoFeeRatio)}，下周从券包中剔除。` : `下周继续补齐${productLabel} SKU 标签，保证核心单品表能追踪全部SKU。`}`
+          : `产品动作：当前筛选未命中核心单品SKU，先补充 SKU 命名规则，再进入产品维度 playbook。`,
+        `结果跟踪：下周复盘同时看GMV环比、促销费比和活动GMV占比，避免只用补贴拉动短期销量。`,
+      ];
 
   const summary = [
     {
@@ -1245,6 +1309,9 @@ function Dashboard({ data }: { data: DataShape }) {
   const effectiveProduct =
     product === PRODUCT_ALL || productOptions.some((item) => item.id === product) ? product : PRODUCT_ALL;
   const selectedCoreProduct = availableCoreProductGroups.find((item) => item.id === effectiveProduct);
+  const includeTargetBudget =
+    selectedCoreProduct?.id !== "one_liter" &&
+    !isOneLiterProduct(selectedCoreProduct?.label ?? effectiveProduct);
 
   const current = useMemo(() => buildAggregate(data, period, platform, region, effectiveProduct), [data, period, platform, region, effectiveProduct]);
   const previous = useMemo(
@@ -1434,20 +1501,26 @@ function Dashboard({ data }: { data: DataShape }) {
           {
             label: "促销费比",
             value: formatPercent(row.promoFeeRatio),
-            sub: promoTargetText(row),
-            tone: trendTone(
-              row.promoFeeRatio !== null && row.targetPromoFeeRatio !== null
-                ? row.promoFeeRatio - row.targetPromoFeeRatio
-                : null,
-              true,
-            ) as "good" | "bad" | "neutral",
+            sub: includeTargetBudget ? promoTargetText(row) : `促销费 ${formatMoney(row.subsidy)}`,
+            tone: includeTargetBudget
+              ? trendTone(
+                  row.promoFeeRatio !== null && row.targetPromoFeeRatio !== null
+                    ? row.promoFeeRatio - row.targetPromoFeeRatio
+                    : null,
+                  true,
+                ) as "good" | "bad" | "neutral"
+              : "neutral",
           },
-          {
-            label: "目标达成率",
-            value: formatPercent(row.targetAchievement),
-            sub: `时间进度 ${formatPercent(row.timeProgress)}`,
-            tone: trendTone(targetGap) as "good" | "bad" | "neutral",
-          },
+          ...(includeTargetBudget
+            ? [
+                {
+                  label: "目标达成率",
+                  value: formatPercent(row.targetAchievement),
+                  sub: `时间进度 ${formatPercent(row.timeProgress)}`,
+                  tone: trendTone(targetGap) as "good" | "bad" | "neutral",
+                },
+              ]
+            : []),
           {
             label: "活动GMV占比",
             value: formatPercent(row.activityShare),
@@ -1457,7 +1530,7 @@ function Dashboard({ data }: { data: DataShape }) {
         ];
         return { ...scope, metrics };
       }),
-    [comparisonEnabled, data, period, effectiveProduct, region, scopeOptions],
+    [comparisonEnabled, data, period, effectiveProduct, region, scopeOptions, includeTargetBudget],
   );
   const summaryPanels = useMemo(
     () =>
@@ -1471,8 +1544,8 @@ function Dashboard({ data }: { data: DataShape }) {
             barLabel: formatMoney(row.gmv),
             primary: row.targetAchievement,
             primaryLabel: formatPercent(row.targetAchievement, 0),
-            secondary: row.timeProgress,
-            secondaryLabel: formatPercent(row.timeProgress, 0),
+            secondary: includeTargetBudget ? row.timeProgress : null,
+            secondaryLabel: includeTargetBudget ? formatPercent(row.timeProgress, 0) : undefined,
           };
         });
         const budgetSummaryRows = regionNodes.map((node) => {
@@ -1512,8 +1585,8 @@ function Dashboard({ data }: { data: DataShape }) {
             barLabel: formatMoney(row.gmv),
             primary: safeRatio(row.gmv, scopeAggregate.gmv),
             primaryLabel: formatPercent(safeRatio(row.gmv, scopeAggregate.gmv), 0),
-            secondary: scopeAggregate.timeProgress,
-            secondaryLabel: formatPercent(scopeAggregate.timeProgress, 0),
+            secondary: includeTargetBudget ? scopeAggregate.timeProgress : null,
+            secondaryLabel: includeTargetBudget ? formatPercent(scopeAggregate.timeProgress, 0) : undefined,
           }));
         return {
           ...scope,
@@ -1523,7 +1596,7 @@ function Dashboard({ data }: { data: DataShape }) {
           promoFeeRows,
         };
       }),
-    [data, period, effectiveProduct, region, scopeOptions, availableCoreProductGroups],
+    [data, period, effectiveProduct, region, scopeOptions, availableCoreProductGroups, includeTargetBudget],
   );
   const selectedPlatformLabel =
     platform === PLATFORM_ALL
@@ -1550,6 +1623,7 @@ function Dashboard({ data }: { data: DataShape }) {
         activities,
         skuRows: coreSkuRows,
         productLabel: narrativeProductLabel,
+        includeTargetBudget,
       }),
     [
       current,
@@ -1564,6 +1638,7 @@ function Dashboard({ data }: { data: DataShape }) {
       activities,
       coreSkuRows,
       narrativeProductLabel,
+      includeTargetBudget,
     ],
   );
 
@@ -1642,7 +1717,7 @@ function Dashboard({ data }: { data: DataShape }) {
               <span>{row.label}</span>
               <small>{row.variant === "merged" ? "双平台合并" : "平台条件"}</small>
             </div>
-            <div className="core-metric-grid">
+            <div className={includeTargetBudget ? "core-metric-grid" : "core-metric-grid compact-target"}>
               {row.metrics.map((metric) => (
                 <CoreMetricCard key={`${row.id}-${metric.label}`} metric={metric} variant={row.variant} />
               ))}
@@ -1700,29 +1775,40 @@ function Dashboard({ data }: { data: DataShape }) {
                   <small>{periodLabel(data, period)} · {selectedRegionLabel(region)} · {selectedProductLabel}</small>
                 </div>
                 <div className="summary-chart-grid">
-                  <ComboBarLineChart
-                    title={`${scope.label}-区域GMV及达成情况`}
-                    rows={scope.regionSummaryRows}
-                    barName="全量GMV"
-                    primaryName="目标GMV达成率"
-                    secondaryName="时间进度"
-                  />
+                  {includeTargetBudget ? (
+                    <ComboBarLineChart
+                      title={`${scope.label}-区域GMV及达成情况`}
+                      rows={scope.regionSummaryRows}
+                      barName="全量GMV"
+                      primaryName="目标GMV达成率"
+                      secondaryName="时间进度"
+                    />
+                  ) : (
+                    <SimpleBarChart
+                      title={`${scope.label}-区域GMV分布`}
+                      rows={scope.regionSummaryRows}
+                      barName="全量GMV"
+                      formatter={formatMoney}
+                    />
+                  )}
                   <ComboBarLineChart
                     title={`${scope.label}-渠道GMV分布`}
                     rows={scope.channelRows}
                     barName="全量GMV"
                     primaryName="全量GMV占比"
-                    secondaryName="时间进度"
+                    secondaryName={includeTargetBudget ? "时间进度" : undefined}
                     lineMax={nicePercentMax(scope.channelRows.flatMap((row) => [row.primary, row.secondary]), 0.6)}
                   />
-                  <ComboBarLineChart
-                    title={`${scope.label}-区域预算使用情况`}
-                    rows={scope.budgetSummaryRows}
-                    barName="已使用预算金额"
-                    bar2Name="剩余预算金额"
-                    primaryName="促销预算使用率"
-                    lineMax={1}
-                  />
+                  {includeTargetBudget ? (
+                    <ComboBarLineChart
+                      title={`${scope.label}-区域预算使用情况`}
+                      rows={scope.budgetSummaryRows}
+                      barName="已使用预算金额"
+                      bar2Name="剩余预算金额"
+                      primaryName="促销预算使用率"
+                      lineMax={1}
+                    />
+                  ) : null}
                   <SimpleBarChart
                     title={`${scope.label}-区域促销费比`}
                     rows={scope.promoFeeRows}
@@ -1746,14 +1832,14 @@ function Dashboard({ data }: { data: DataShape }) {
               <thead>
                 <tr>
                   <th>月份</th>
-                  <th>当月时间进度</th>
+                  {includeTargetBudget ? <th>当月时间进度</th> : null}
                   <th>全量GMV</th>
-                  <th>GMV目标达成率</th>
+                  {includeTargetBudget ? <th>GMV目标达成率</th> : null}
                   <th>{colLabel("环比", "全量GMV")}</th>
                   <th>{colLabel("同比", "全量GMV")}</th>
                   <th>实际TM费比</th>
                   <th>实际促销费比</th>
-                  <th>目标促销费比</th>
+                  {includeTargetBudget ? <th>目标促销费比</th> : null}
                   <th>促销费</th>
                   <th>{colLabel("环比", "促销费比")}</th>
                   <th>{colLabel("同比", "促销费比")}</th>
@@ -1762,14 +1848,14 @@ function Dashboard({ data }: { data: DataShape }) {
               <tbody>
                 <tr>
                   <td>{periodMonthText(data, period)}</td>
-                  <td>{formatPercent(current.timeProgress)}</td>
+                  {includeTargetBudget ? <td>{formatPercent(current.timeProgress)}</td> : null}
                   <td>{formatMoney(current.gmv)}</td>
-                  <td>{formatPercent(current.targetAchievement)}</td>
+                  {includeTargetBudget ? <td>{formatPercent(current.targetAchievement)}</td> : null}
                   <td className={trendTone(wow)}>{formatDelta(wow)}</td>
                   <td className={trendTone(yoy)}>{formatDelta(yoy)}</td>
                   <td>{formatPercent(current.actualTmFeeRatio)}</td>
                   <td>{formatPercent(current.promoFeeRatio)}</td>
-                  <td>{formatPercent(current.targetPromoFeeRatio)}</td>
+                  {includeTargetBudget ? <td>{formatPercent(current.targetPromoFeeRatio)}</td> : null}
                   <td>{formatMoney(current.subsidy)}</td>
                   <td className={trendTone(promoWow, true)}>{formatPointDelta(promoWow)}</td>
                   <td className={trendTone(promoYoy, true)}>{formatPointDelta(promoYoy)}</td>
@@ -1787,14 +1873,18 @@ function Dashboard({ data }: { data: DataShape }) {
               <thead>
                 <tr>
                   <th rowSpan={2}>区域</th>
-                  <th colSpan={5}>MTD（{periodLabel(data, period).replace("WTD ", "")}）</th>
+                  <th colSpan={includeTargetBudget ? 5 : 2}>MTD（{periodLabel(data, period).replace("WTD ", "")}）</th>
                   <th colSpan={7}>WTD（{periodLabel(data, period).replace("WTD ", "")}）</th>
                 </tr>
                 <tr>
                   <th>全量GMV</th>
-                  <th>{colLabel("目标GMV", "达成率")}</th>
-                  <th>{colLabel("促销预算", "使用率")}</th>
-                  <th>{colLabel("促销预算", "剩余金额")}</th>
+                  {includeTargetBudget ? (
+                    <>
+                      <th>{colLabel("目标GMV", "达成率")}</th>
+                      <th>{colLabel("促销预算", "使用率")}</th>
+                      <th>{colLabel("促销预算", "剩余金额")}</th>
+                    </>
+                  ) : null}
                   <th>促销费比</th>
                   <th>全量GMV</th>
                   <th>{colLabel("环比", "全量GMV")}</th>
@@ -1818,9 +1908,13 @@ function Dashboard({ data }: { data: DataShape }) {
                     >
                       <th>{node}</th>
                       <td>{formatMoney(row.gmv)}</td>
-                      <td>{formatPercent(row.targetAchievement)}</td>
-                      <td>{formatPercent(row.promoBudgetUsage)}</td>
-                      <td>{formatMoney(row.promoBudgetRemaining)}</td>
+                      {includeTargetBudget ? (
+                        <>
+                          <td>{formatPercent(row.targetAchievement)}</td>
+                          <td>{formatPercent(row.promoBudgetUsage)}</td>
+                          <td>{formatMoney(row.promoBudgetRemaining)}</td>
+                        </>
+                      ) : null}
                       <td>{formatPercent(row.promoFeeRatio)}</td>
                       <td>{formatMoney(row.gmv)}</td>
                       <td className={trendTone(rowWow)}>{formatDelta(rowWow)}</td>
@@ -1851,14 +1945,14 @@ function Dashboard({ data }: { data: DataShape }) {
                     <th>SKU</th>
                     <th>全量GMV</th>
                     <th>{colLabel("全量GMV", "占比")}</th>
-                    <th>{colLabel("目标GMV", "达成率")}</th>
+                    {includeTargetBudget ? <th>{colLabel("目标GMV", "达成率")}</th> : null}
                     <th>{colLabel("环比", "全量GMV")}</th>
                     <th>{colLabel("同比", "全量GMV")}</th>
                     <th>活动GMV</th>
                     <th>活动GMV占比</th>
                     <th>促销费用</th>
                     <th>促销费比</th>
-                    <th>{colLabel("促销预算", "使用率")}</th>
+                    {includeTargetBudget ? <th>{colLabel("促销预算", "使用率")}</th> : null}
                     <th>活动折扣率</th>
                   </tr>
                 </thead>
@@ -1873,14 +1967,14 @@ function Dashboard({ data }: { data: DataShape }) {
                         <th>{row.name}</th>
                         <td>{formatMoney(row.gmv)}</td>
                         <td>{formatPercent(safeRatio(row.gmv, current.gmv))}</td>
-                        <td>{formatPercent(row.targetAchievement)}</td>
+                        {includeTargetBudget ? <td>{formatPercent(row.targetAchievement)}</td> : null}
                         <td className={trendTone(rowWow)}>{formatDelta(rowWow)}</td>
                         <td className={trendTone(rowYoy)}>{formatDelta(rowYoy)}</td>
                         <td>{formatMoney(row.activityGmv)}</td>
                         <td>{formatPercent(row.activityShare)}</td>
                         <td>{formatMoney(row.subsidy)}</td>
                         <td>{formatPercent(row.promoFeeRatio)}</td>
-                        <td>{formatPercent(row.promoBudgetUsage)}</td>
+                        {includeTargetBudget ? <td>{formatPercent(row.promoBudgetUsage)}</td> : null}
                         <td>{formatPercent(row.activityDiscount)}</td>
                       </tr>
                     );

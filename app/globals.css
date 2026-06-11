@@ -224,6 +224,10 @@ select {
   gap: 12px;
 }
 
+.core-metric-grid.compact-target {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
 .core-metric-card {
   min-height: 150px;
   padding: 18px 20px;

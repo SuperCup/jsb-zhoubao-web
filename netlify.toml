@@ -2,6 +2,9 @@
   command = "npm run build:public"
   publish = "public-dist"
 
+[build.environment]
+  NODE_VERSION = "22.14.0"
+
 [[redirects]]
   from = "/*"
   to = "/index.html"

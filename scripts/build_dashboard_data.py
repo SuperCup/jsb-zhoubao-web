@@ -741,7 +741,7 @@ def write_logic_doc(data: dict[str, Any]) -> None:
 - 平台映射：前端展示 `淘宝闪购` 对应目标/预算表中的 `饿了么`；前端展示 `京东秒送` 对应目标/预算表中的 `京东到家`。
 - 区域字段：所有源表统一使用 `清洗_大区` 做区域匹配，使用脚本内置层级聚合为 `CBC`、`CIB`、`华中`、`NX`、`XJ`、`YN`。清洗后仍为空的记录保留在 `未识别`，不并入正式 BU。
 - 商品筛选字段：使用源表 `清洗_商品名`。网页默认展示全部商品，选择单个商品后，核心指标、Summary、区域表和下钻表按该商品重算。
-- 数据文件：脚本输出到 `public/data/dashboard-data.json`，网页运行时从 `/data/dashboard-data.json` 加载，避免把大体量商品明细打入前端代码包。
+- 数据文件：核心数据输出到 `public/data/dashboard-data.json`，商品明细按平台拆分到 `public/data/product-data-*.json`，网页运行时合并加载，避免把大体量商品明细打入前端代码包或超过单文件限制。
 
 ## 核心指标口径
 
@@ -800,12 +800,57 @@ def write_logic_doc(data: dict[str, Any]) -> None:
 def main() -> None:
     data = build_data()
     OUTPUT_JSON.parent.mkdir(parents=True, exist_ok=True)
-    OUTPUT_JSON.write_text(
-        json.dumps(data, ensure_ascii=False, separators=(",", ":")),
-        encoding="utf-8",
-    )
+    product_files: list[str] = []
+    for platform_id in PLATFORMS:
+        product_file = OUTPUT_JSON.parent / f"product-data-{platform_id}.json"
+        product_files.append(product_file.name)
+        product_payload = {
+            "productRecords": [
+                row for row in data["productRecords"] if row["platformId"] == platform_id
+            ],
+            "breakdowns": {
+                key: [
+                    row
+                    for row in data["breakdowns"][key]
+                    if row["platformId"] == platform_id
+                ]
+                for key in [
+                    "channelsByProduct",
+                    "brandsByProduct",
+                    "merchantsByProduct",
+                    "activitiesByProduct",
+                ]
+            },
+        }
+        product_file.write_text(
+            json.dumps(product_payload, ensure_ascii=False, separators=(",", ":")),
+            encoding="utf-8",
+        )
+
+    core_data = {
+        **data,
+        "metadata": {
+            **data["metadata"],
+            "productDataFiles": product_files,
+        },
+        "breakdowns": {
+            key: value
+            for key, value in data["breakdowns"].items()
+            if key
+            not in {
+                "channelsByProduct",
+                "brandsByProduct",
+                "merchantsByProduct",
+                "activitiesByProduct",
+            }
+        },
+    }
+    core_data.pop("productRecords", None)
+    OUTPUT_JSON.write_text(json.dumps(core_data, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
     write_logic_doc(data)
     print(f"Wrote {OUTPUT_JSON}")
+    for product_file in product_files:
+        print(f"Wrote {OUTPUT_JSON.parent / product_file}")
     print(f"Wrote {LOGIC_DOC}")
     for item in data["reconciliation"]:
         print(

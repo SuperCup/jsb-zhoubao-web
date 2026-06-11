@@ -98,6 +98,7 @@ type DataShape = {
     regionParent: Record<string, string>;
     regionGroups: Record<string, string[]>;
     productOrder?: string[];
+    productDataFiles?: string[];
   };
   records: MetricRow[];
   productRecords?: MetricRow[];
@@ -119,6 +120,7 @@ const PLATFORM_ALL = "all";
 const REGION_ALL = "all";
 const PRODUCT_ALL = "all";
 const DATA_URL = "/data/dashboard-data.json";
+const DATA_DIR = "/data";
 const GROUP_ORDER = ["CBC", "CIB", "NX", "XJ", "YN", "华中", "未识别"];
 const EXCEL_REGION_ROWS = [
   "CBC-CQ",
@@ -140,6 +142,66 @@ const EXCEL_REGION_ROWS = [
 
 function safeRatio(numerator: number, denominator: number): number | null {
   return denominator ? numerator / denominator : null;
+}
+
+type ProductDataPayload = Pick<DataShape, "productRecords"> & {
+  breakdowns: Pick<
+    NonNullable<DataShape["breakdowns"]>,
+    "channelsByProduct" | "brandsByProduct" | "merchantsByProduct" | "activitiesByProduct"
+  >;
+};
+
+async function fetchJson<T>(url: string): Promise<T> {
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(`数据加载失败：${response.status}`);
+  return response.json() as Promise<T>;
+}
+
+async function loadDashboardData(): Promise<DataShape> {
+  const coreData = await fetchJson<DataShape>(DATA_URL);
+  const productFiles = coreData.metadata.productDataFiles ?? [];
+  if (!productFiles.length) return coreData;
+
+  const productPayloads = await Promise.all(
+    productFiles.map((file) => fetchJson<ProductDataPayload>(`${DATA_DIR}/${file}`)),
+  );
+
+  return productPayloads.reduce<DataShape>(
+    (merged, payload) => ({
+      ...merged,
+      productRecords: [...(merged.productRecords ?? []), ...(payload.productRecords ?? [])],
+      breakdowns: {
+        ...merged.breakdowns,
+        channelsByProduct: [
+          ...(merged.breakdowns.channelsByProduct ?? []),
+          ...(payload.breakdowns.channelsByProduct ?? []),
+        ],
+        brandsByProduct: [
+          ...(merged.breakdowns.brandsByProduct ?? []),
+          ...(payload.breakdowns.brandsByProduct ?? []),
+        ],
+        merchantsByProduct: [
+          ...(merged.breakdowns.merchantsByProduct ?? []),
+          ...(payload.breakdowns.merchantsByProduct ?? []),
+        ],
+        activitiesByProduct: [
+          ...(merged.breakdowns.activitiesByProduct ?? []),
+          ...(payload.breakdowns.activitiesByProduct ?? []),
+        ],
+      },
+    }),
+    {
+      ...coreData,
+      productRecords: [],
+      breakdowns: {
+        ...coreData.breakdowns,
+        channelsByProduct: [],
+        brandsByProduct: [],
+        merchantsByProduct: [],
+        activitiesByProduct: [],
+      },
+    },
+  );
 }
 
 function leavesFor(data: DataShape, region: string): string[] {
@@ -970,11 +1032,7 @@ export default function Home() {
 
   useEffect(() => {
     let cancelled = false;
-    fetch(DATA_URL)
-      .then((response) => {
-        if (!response.ok) throw new Error(`数据加载失败：${response.status}`);
-        return response.json() as Promise<DataShape>;
-      })
+    loadDashboardData()
       .then((payload) => {
         if (!cancelled) setDashboardData(payload);
       })

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import re
 from collections import defaultdict
 from datetime import date, datetime
 from pathlib import Path
@@ -116,6 +117,16 @@ REGION_ORDER = [
     "华中-湖南",
     "华中-非湖南",
     "未识别",
+]
+
+CORE_PRODUCT_GROUPS = [
+    {
+        "id": "one_liter",
+        "label": "一升装（1L）",
+        "alias": "一生装",
+        "description": "会议中提到的年度核心单品，按商品名中出现 1L/１L 的规格识别。",
+        "matchPattern": r"(?:1\s*[lLＬｌ]|１\s*[lLＬｌ])",
+    }
 ]
 
 
@@ -680,6 +691,25 @@ def build_data() -> dict[str, Any]:
     for row in product_records:
         if row["periodId"] == "0601-0607" and row.get("product"):
             product_totals[str(row["product"])] += row.get("gmv", 0) or 0
+    core_product_groups: list[dict[str, Any]] = []
+    for group in CORE_PRODUCT_GROUPS:
+        pattern = re.compile(group["matchPattern"], re.IGNORECASE)
+        matched_skus = {
+            str(row.get("product"))
+            for row in product_records
+            if row["periodId"] == "0601-0607"
+            and row.get("product")
+            and pattern.search(str(row.get("product")))
+        }
+        core_product_groups.append(
+            {
+                **group,
+                "skuCount": len(matched_skus),
+                "currentGmv": round_float(
+                    sum(product_totals.get(sku, 0.0) for sku in matched_skus), 2
+                ),
+            }
+        )
 
     return {
         "metadata": {
@@ -710,6 +740,7 @@ def build_data() -> dict[str, Any]:
                 for product, _ in sorted(product_totals.items(), key=lambda item: item[1], reverse=True)
                 if product not in {"未识别", "nan", "None", ""}
             ],
+            "coreProductGroups": core_product_groups,
         },
         "records": records,
         "productRecords": product_records,
@@ -740,7 +771,7 @@ def write_logic_doc(data: dict[str, Any]) -> None:
 - 页面默认展示目标分析周期 `0601-0607`，不提供周期筛选；`0525-0531` 仅用于环比参照，`25年0601-0607` 仅用于同比参照。
 - 平台映射：前端展示 `淘宝闪购` 对应目标/预算表中的 `饿了么`；前端展示 `京东秒送` 对应目标/预算表中的 `京东到家`。
 - 区域字段：所有源表统一使用 `清洗_大区` 做区域匹配，使用脚本内置层级聚合为 `CBC`、`CIB`、`华中`、`NX`、`XJ`、`YN`。清洗后仍为空的记录保留在 `未识别`，不并入正式 BU。
-- 商品筛选字段：使用源表 `清洗_商品名`。网页默认展示全部商品，选择单个商品后，核心指标、Summary、区域表和下钻表按该商品重算。
+- 核心单品筛选字段：使用源表 `清洗_商品名`。会议中提到的 `一生装` 按业务口径识别为 `一升装（1L）`，匹配商品名中出现 `1L/１L` 的 SKU。网页默认展示全部商品，选择核心单品后，核心指标、AI诊断、Summary、区域表和下钻表按该核心单品重算。
 - 数据文件：核心数据输出到 `public/data/dashboard-data.json`，商品明细按平台拆分到 `public/data/product-data-*.json`，网页运行时合并加载，避免把大体量商品明细打入前端代码包或超过单文件限制。
 
 ## 核心指标口径
@@ -781,7 +812,8 @@ def write_logic_doc(data: dict[str, Any]) -> None:
 - 渠道下钻：全量表按 `清洗_渠道` 统计 GMV，账单表按同字段补充活动 GMV 和促销费。
 - 品牌下钻：按 `清洗_品牌` 聚合。
 - 商户与商品下钻：每个平台、周期、区域保留 GMV Top 18，用于页面明细查看。
-- 商品筛选下的区域汇总：按 `清洗_大区 + 清洗_商品名` 聚合，目标/预算仍按平台、年月、BU区域匹配，用于观察该商品在对应区域目标与预算框架下的表现。
+- 核心单品筛选下的区域汇总：按 `清洗_大区 + 清洗_商品名` 聚合后，再按核心单品规则合并 SKU；目标/预算仍按平台、年月、BU区域匹配，多 SKU 合并时按 `平台+周期+区域` 去重，避免重复累加 BU 目标和预算。
+- 核心单品表：选择 `一升装（1L）` 时展示所有命中 SKU 的 GMV、费比、目标达成率、活动GMV占比、预算使用率、环比和同比。
 - 活动名称下钻：按账单表活动名称聚合，输出 `核销金额`、`活动GMV`、`促销费比`、`活动ROI`、`核券量`。
 
 ## 校验

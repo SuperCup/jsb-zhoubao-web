@@ -559,7 +559,7 @@ select {
 
 .diagnostic-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 12px;
 }
 
@@ -796,6 +796,10 @@ select {
 
 .region-weekly-table {
   min-width: 1360px;
+}
+
+.core-product-table {
+  min-width: 1320px;
 }
 
 .metric-table th,

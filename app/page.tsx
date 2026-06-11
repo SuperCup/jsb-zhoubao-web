@@ -99,6 +99,7 @@ type DataShape = {
     regionGroups: Record<string, string[]>;
     productOrder?: string[];
     productDataFiles?: string[];
+    coreProductGroups?: CoreProductGroup[];
   };
   records: MetricRow[];
   productRecords?: MetricRow[];
@@ -122,6 +123,25 @@ const PRODUCT_ALL = "all";
 const DATA_URL = "/data/dashboard-data.json";
 const DATA_DIR = "/data";
 const GROUP_ORDER = ["CBC", "CIB", "NX", "XJ", "YN", "华中", "未识别"];
+type CoreProductGroup = {
+  id: string;
+  label: string;
+  alias?: string;
+  description?: string;
+  matchPattern: string;
+  skuCount?: number;
+  currentGmv?: number;
+};
+
+const DEFAULT_CORE_PRODUCT_GROUPS: CoreProductGroup[] = [
+  {
+    id: "one_liter",
+    label: "一升装（1L）",
+    alias: "一生装",
+    description: "按商品名中出现 1L/１L 的 SKU 识别",
+    matchPattern: "(?:1\\s*[lLＬｌ]|１\\s*[lLＬｌ])",
+  },
+];
 const EXCEL_REGION_ROWS = [
   "CBC-CQ",
   "CBC-SC",
@@ -214,7 +234,39 @@ function platformIds(data: DataShape, platform: string): string[] {
   return [platform];
 }
 
+function coreProductGroups(data: DataShape): CoreProductGroup[] {
+  const groups = data.metadata.coreProductGroups?.length
+    ? data.metadata.coreProductGroups
+    : DEFAULT_CORE_PRODUCT_GROUPS;
+  return groups.filter((group) => (group.skuCount ?? 1) > 0);
+}
+
+function matchesCoreProduct(
+  productName: string | null | undefined,
+  selectedProduct: string,
+  groups: CoreProductGroup[],
+): boolean {
+  if (selectedProduct === PRODUCT_ALL) return true;
+  const normalized = String(productName ?? "").trim();
+  if (!normalized || ["未识别", "nan", "None"].includes(normalized)) return false;
+  const group = groups.find((item) => item.id === selectedProduct);
+  if (!group) return normalized === selectedProduct;
+  try {
+    return new RegExp(group.matchPattern, "i").test(normalized);
+  } catch {
+    return false;
+  }
+}
+
+function matchesAnyCoreProduct(
+  productName: string | null | undefined,
+  groups: CoreProductGroup[],
+): boolean {
+  return groups.some((group) => matchesCoreProduct(productName, group.id, groups));
+}
+
 function aggregateRows(rows: MetricRow[]): Aggregate {
+  const uniquePlanKeys = new Set<string>();
   const totals = rows.reduce(
     (acc, row) => {
       acc.gmv += row.gmv || 0;
@@ -223,8 +275,12 @@ function aggregateRows(rows: MetricRow[]): Aggregate {
       acc.users += row.users || 0;
       acc.activityGmv += row.activityGmv || 0;
       acc.subsidy += row.subsidy || 0;
-      acc.budget += row.budget || 0;
-      acc.target += row.buTarget || 0;
+      const planKey = `${row.platformId}|${row.periodId}|${row.region}`;
+      if (!uniquePlanKeys.has(planKey)) {
+        acc.budget += row.budget || 0;
+        acc.target += row.buTarget || 0;
+        uniquePlanKeys.add(planKey);
+      }
       if (row.timeProgress && !acc.timeProgress) acc.timeProgress = row.timeProgress;
       return acc;
     },
@@ -307,13 +363,14 @@ function buildAggregate(
 ): Aggregate {
   const selectedLeaves = new Set(leavesFor(data, region));
   const selectedPlatforms = new Set(platformIds(data, platform));
+  const groups = coreProductGroups(data);
   return aggregateRows(
     metricRowsForProduct(data, product).filter(
       (row) =>
         row.periodId === periodId &&
         selectedPlatforms.has(row.platformId) &&
         selectedLeaves.has(row.region) &&
-        (product === PRODUCT_ALL || row.product === product),
+        matchesCoreProduct(row.product, product, groups),
     ),
   );
 }
@@ -795,10 +852,6 @@ function compareAggregate(current: Aggregate, baseline: Aggregate): number | nul
   return safeRatio(current.gmv - baseline.gmv, baseline.gmv);
 }
 
-function compareValue(current: number, baseline: number): number | null {
-  return safeRatio(current - baseline, baseline);
-}
-
 function promoRatioChange(current: Aggregate, baseline: Aggregate): number | null {
   if (current.promoFeeRatio === null || baseline.promoFeeRatio === null) return null;
   return current.promoFeeRatio - baseline.promoFeeRatio;
@@ -813,6 +866,7 @@ function collectBreakdown(
   selectedPlatforms: Set<string>,
   selectedLeaves: Set<string>,
   selectedProduct = PRODUCT_ALL,
+  groups: CoreProductGroup[] = DEFAULT_CORE_PRODUCT_GROUPS,
 ) {
   const grouped = new Map<string, MetricRow[]>();
   rows
@@ -821,7 +875,7 @@ function collectBreakdown(
         row.periodId === periodId &&
         selectedPlatforms.has(row.platformId) &&
         selectedLeaves.has(row.region) &&
-        (selectedProduct === PRODUCT_ALL || row.product === selectedProduct),
+        matchesCoreProduct(row.product, selectedProduct, groups),
     )
     .forEach((row) => {
       const name = String(row[key] ?? "未识别");
@@ -840,6 +894,7 @@ function collectActivities(
   selectedPlatforms: Set<string>,
   selectedLeaves: Set<string>,
   selectedProduct = PRODUCT_ALL,
+  groups: CoreProductGroup[] = DEFAULT_CORE_PRODUCT_GROUPS,
 ) {
   const grouped = new Map<
     string,
@@ -851,7 +906,7 @@ function collectActivities(
         row.periodId === periodId &&
         selectedPlatforms.has(row.platformId) &&
         selectedLeaves.has(row.region) &&
-        (selectedProduct === PRODUCT_ALL || row.product === selectedProduct),
+        matchesCoreProduct(row.product, selectedProduct, groups),
     )
     .forEach((row) => {
       const bucket = grouped.get(row.activityName) ?? {
@@ -874,6 +929,37 @@ function collectActivities(
     .sort((a, b) => b.redemptionAmount - a.redemptionAmount);
 }
 
+function collectCoreSkuRows(
+  data: DataShape,
+  periodId: string,
+  selectedPlatforms: Set<string>,
+  selectedLeaves: Set<string>,
+  selectedProduct: string,
+  groups: CoreProductGroup[],
+) {
+  const grouped = new Map<string, MetricRow[]>();
+  (data.productRecords ?? [])
+    .filter(
+      (row) =>
+        row.periodId === periodId &&
+        selectedPlatforms.has(row.platformId) &&
+        selectedLeaves.has(row.region) &&
+        (selectedProduct === PRODUCT_ALL
+          ? matchesAnyCoreProduct(row.product, groups)
+          : matchesCoreProduct(row.product, selectedProduct, groups)),
+    )
+    .forEach((row) => {
+      const name = String(row.product ?? "未识别");
+      const bucket = grouped.get(name) ?? [];
+      bucket.push(row);
+      grouped.set(name, bucket);
+    });
+
+  return Array.from(grouped.entries())
+    .map(([name, bucket]) => ({ name, ...aggregateRows(bucket) }))
+    .sort((a, b) => b.gmv - a.gmv);
+}
+
 function buildNarrative({
   current,
   previous,
@@ -884,6 +970,9 @@ function buildNarrative({
   channels,
   brands,
   merchants,
+  activities,
+  skuRows,
+  productLabel,
 }: {
   current: Aggregate;
   previous: Aggregate;
@@ -894,6 +983,16 @@ function buildNarrative({
   channels: Array<{ name: string } & Aggregate>;
   brands: Array<{ name: string } & Aggregate>;
   merchants: Array<{ name: string } & Aggregate>;
+  activities: Array<{
+    activityName: string;
+    redemptionAmount: number;
+    activityGmv: number;
+    promoFeeRatio: number | null;
+    activityRoi: number | null;
+    couponCount: number;
+  }>;
+  skuRows: Array<{ name: string } & Aggregate>;
+  productLabel: string;
 }) {
   const wow = compareAggregate(current, previous);
   const yoy = compareAggregate(current, lastYear);
@@ -944,6 +1043,20 @@ function buildNarrative({
   const highActivityChannel = channels
     .filter((item) => item.gmv > current.gmv * 0.03 && item.activityShare !== null)
     .sort((a, b) => (b.activityShare ?? 0) - (a.activityShare ?? 0))[0];
+  const lowEfficiencyActivity = activities
+    .filter((item) => item.redemptionAmount > current.subsidy * 0.02)
+    .sort((a, b) => {
+      const aRisk = (a.promoFeeRatio ?? 0) - (a.activityRoi ?? 0) / 100;
+      const bRisk = (b.promoFeeRatio ?? 0) - (b.activityRoi ?? 0) / 100;
+      return bRisk - aRisk;
+    })[0];
+  const topSku = skuRows[0];
+  const efficientSku = skuRows
+    .filter((item) => item.gmv > current.gmv * 0.01)
+    .sort((a, b) => (a.promoFeeRatio ?? 0) - (b.promoFeeRatio ?? 0))[0];
+  const highFeeSku = skuRows
+    .filter((item) => item.gmv > current.gmv * 0.01)
+    .sort((a, b) => (b.promoFeeRatio ?? 0) - (a.promoFeeRatio ?? 0))[0];
   const feeRisk =
     current.targetPromoFeeRatio !== null && current.promoFeeRatio !== null
       ? current.promoFeeRatio - current.targetPromoFeeRatio
@@ -955,6 +1068,20 @@ function buildNarrative({
     highFeeChannel?.name ?? (regionLabel === "全国/全区域" ? "高费比BU/系统" : regionLabel);
   const activityRiskTarget = highActivityChannel?.name ?? topChannel?.name ?? "活动渠道";
   const reportScope = `${scopeLabel} · ${regionLabel}`;
+  const targetAchievementGap =
+    current.targetAchievement !== null && current.timeProgress !== null
+      ? current.timeProgress - current.targetAchievement
+      : null;
+  const nextTargetAchievement =
+    current.targetAchievement !== null
+      ? current.targetAchievement + Math.max(0.02, Math.min(0.08, Math.max(targetAchievementGap ?? 0, 0)))
+      : null;
+  const nextFeeTarget =
+    current.promoFeeRatio !== null
+      ? Math.max(current.targetPromoFeeRatio ?? 0, current.promoFeeRatio - 0.01)
+      : null;
+  const nextActivityShareTarget =
+    current.activityShare !== null ? Math.min(current.activityShare, 0.6) : null;
 
   const conclusions = [
     `${reportScope}目标分析周期全量GMV ${formatMoney(current.gmv)}，环比${formatDelta(wow)}，同比${formatDelta(yoy)}。`,
@@ -976,6 +1103,12 @@ function buildNarrative({
     highActivityChannel
       ? `${highActivityChannel.name}活动GMV占比 ${formatPercent(highActivityChannel.activityShare)}，高于当前范围整体 ${formatPercent(current.activityShare)}；若继续升高，说明基础GMV承接不足。`
       : `当前没有超过GMV 3%门槛的高活动依赖渠道，整体活动GMV占比为 ${formatPercent(current.activityShare)}。`,
+    lowEfficiencyActivity
+      ? `活动机制中 ${lowEfficiencyActivity.activityName} 核销金额 ${formatMoney(lowEfficiencyActivity.redemptionAmount)}、促销费比 ${formatPercent(lowEfficiencyActivity.promoFeeRatio)}、ROI ${formatRoi(lowEfficiencyActivity.activityRoi)}，是优先复盘的低效机制候选。`
+      : `当前范围内未识别到核销金额超过总促销费2%的明显低效活动，机制侧先按区域费比和活动占比排序处理。`,
+    topSku
+      ? `${productLabel} SKU 中 ${topSku.name} GMV ${formatMoney(topSku.gmv)}、占当前范围 ${formatPercent(safeRatio(topSku.gmv, current.gmv))}；${efficientSku ? `${efficientSku.name}费比 ${formatPercent(efficientSku.promoFeeRatio)}，可作为费用效率参照。` : ""}`
+      : `${productLabel} 未命中可展示 SKU，产品维度暂不输出单品动作。`,
     flagshipShare !== null
       ? flagshipTargetGap !== null && flagshipTargetGap > 0
         ? `官旗/酒小二相关商户GMV占比 ${formatPercent(flagshipShare)}，距离30%目标仍差 ${formatPointDistance(flagshipTargetGap)}；若占比继续下滑，核心矛盾更可能在供给和拓店，而非继续加促销费。`
@@ -990,6 +1123,9 @@ function buildNarrative({
     activityRiskLevel === "high"
       ? `降依赖：${activityRiskTarget}活动GMV占比 ${formatPercent(highActivityChannel?.activityShare ?? current.activityShare)}，减少纯补贴放量，改为加品、换品和门槛优化，目标是把整体活动GMV占比从 ${formatPercent(current.activityShare)} 拉回60%以内。`
       : `促增长：活动GMV占比 ${formatPercent(current.activityShare)} 未超过70%高风险线，优先把资源投向${topChannel?.name ?? "最高GMV渠道"}，该渠道GMV ${formatMoney(topChannel?.gmv ?? current.gmv)}、费比 ${formatPercent(topChannel?.promoFeeRatio ?? current.promoFeeRatio)}。`,
+    lowEfficiencyActivity
+      ? `调机制：先复盘 ${lowEfficiencyActivity.activityName}，若下周 ROI 仍低于 ${formatRoi(2)} 或费比仍高于 ${formatPercent(nextFeeTarget)}，停止该机制或改为满减门槛券；目标是释放 ${formatMoney(lowEfficiencyActivity.redemptionAmount * 0.3)} 以上促销费。`
+      : `调机制：本周未出现明确低效活动，保留活动池但设置机制熔断线：活动ROI低于 ${formatRoi(2)} 且费比高于 ${formatPercent(nextFeeTarget)} 时停止投放。`,
     longTailBrand
       ? `看结构：${longTailBrand.name}在Top4之外贡献 ${formatMoney(longTailBrand.gmv)}、占比 ${formatPercent(safeRatio(longTailBrand.gmv, current.gmv))}，下周对比竞品大单品满减和IP合作，判断是否侵蚀${topBrand?.name ?? "头部品牌"}。`
       : `看结构：当前Top4品牌占比 ${formatPercent(topBrandsShare)}，未识别到GMV超过1%的长尾品牌；下周重点看${topBrand?.name ?? "头部品牌"}是否继续集中。`,
@@ -997,7 +1133,23 @@ function buildNarrative({
       ? `补标签：当前范围无法识别官旗/酒小二GMV，先补齐旗舰店、官方、自营、酒小二商户标签，再判断30%官旗目标差距。`
       : flagshipTargetGap !== null && flagshipTargetGap > 0
         ? `补官旗：官旗/酒小二占比 ${formatPercent(flagshipShare)}，距离30%目标差 ${formatPointDistance(flagshipTargetGap)}，优先推动拓店和供给恢复，而不是继续抬费比；重点跟进酒小二/旗舰店供给缺口。`
-        : `固官旗：官旗/酒小二占比 ${formatPercent(flagshipShare)} 已接近或达到30%目标，保持专人运营与拓店协同，避免服务商定制品下线再次拖累占比。`,
+      : `固官旗：官旗/酒小二占比 ${formatPercent(flagshipShare)} 已接近或达到30%目标，保持专人运营与拓店协同，避免服务商定制品下线再次拖累占比。`,
+  ];
+
+  const playbook = [
+    highFeeRegion
+      ? `区域控费：${highFeeRegion.node}当前促销费比 ${formatPercent(highFeeRegion.current.promoFeeRatio)}，下周目标压到 ${formatPercent(nextFeeTarget)} 以内；动作顺序为停低ROI活动、剔除高费SKU、提高券门槛，执行后看GMV是否仍高于 ${formatMoney(highFeeRegion.current.gmv * 0.95)}。`
+      : `区域控费：当前没有明显高费比区域，统一设置费比红线 ${formatPercent(nextFeeTarget)}，超过红线先停低ROI机制。`,
+    weakDriver
+      ? `区域追量：${weakDriver.node}环比变化 ${formatMoney(weakDriver.inc)}，下周目标至少追回 ${formatMoney(Math.abs(Math.min(weakDriver.inc, 0)) * 0.5 || current.gmv * 0.03)}；复制${topDriver?.node ?? "高增区域"}的高GMV渠道动作，先补货和曝光，再追加券。`
+      : `区域追量：当前区域没有可拆分弱项，目标达成率下周提升到 ${formatPercent(nextTargetAchievement)}；动作优先级为高GMV渠道加品、核心SKU补供给、预算向高ROI活动集中。`,
+    fastBudgetRegion
+      ? `预算节奏：${fastBudgetRegion.node}预算使用率 ${formatPercent(fastBudgetRegion.current.promoBudgetUsage)}，目标控制在时间进度 +5pp 内；若全国活动不能区域下线，则单独限制${fastBudgetRegion.node}高费SKU券包。`
+      : `预算节奏：当前预算使用率 ${formatPercent(current.promoBudgetUsage)}，下周目标不高于时间进度 +5pp；预算只投GMV占比前3渠道和ROI达标机制。`,
+    topSku
+      ? `产品动作：${topSku.name}是${productLabel}第一SKU，保持主推；${highFeeSku ? `${highFeeSku.name}费比 ${formatPercent(highFeeSku.promoFeeRatio)}，若GMV占比仅 ${formatPercent(safeRatio(highFeeSku.gmv, current.gmv))} 且费比高于整体 ${formatPercent(current.promoFeeRatio)}，下周从券包中剔除。` : `下周继续补齐${productLabel} SKU 标签，保证核心单品表能追踪全部SKU。`}`
+      : `产品动作：当前筛选未命中核心单品SKU，先补充 SKU 命名规则，再进入产品维度 playbook。`,
+    `结果目标：下周复盘必须同时看三条线，GMV目标达成率提升到 ${formatPercent(nextTargetAchievement)}、促销费比不高于 ${formatPercent(nextFeeTarget)}、活动GMV占比不高于 ${formatPercent(nextActivityShareTarget)}。`,
   ];
 
   const summary = [
@@ -1023,7 +1175,7 @@ function buildNarrative({
     },
   ];
 
-  return { conclusions, analysis, actions, summary };
+  return { conclusions, analysis, actions, playbook, summary };
 }
 
 export default function Home() {
@@ -1077,29 +1229,22 @@ function Dashboard({ data }: { data: DataShape }) {
 
   const selectedLeaves = useMemo(() => new Set(leavesFor(data, region)), [data, region]);
   const selectedPlatforms = useMemo(() => new Set(platformIds(data, platform)), [data, platform]);
+  const availableCoreProductGroups = useMemo(() => coreProductGroups(data), [data]);
   const productOptions = useMemo(() => {
-    const available = new Set<string>();
-    (data.productRecords ?? []).forEach((row) => {
-      const productName = row.product?.trim();
-      if (
-        row.periodId === period &&
-        selectedPlatforms.has(row.platformId) &&
-        selectedLeaves.has(row.region) &&
-        productName &&
-        !["未识别", "nan", "None"].includes(productName)
-      ) {
-        available.add(productName);
-      }
-    });
-    const ordered = (data.metadata.productOrder ?? []).filter((item) => available.has(item));
-    const extras = Array.from(available)
-      .filter((item) => !ordered.includes(item))
-      .sort((a, b) => a.localeCompare(b, "zh-CN"));
-    return [...ordered, ...extras];
-  }, [data, period, selectedPlatforms, selectedLeaves]);
+    return availableCoreProductGroups.filter((group) =>
+      (data.productRecords ?? []).some(
+        (row) =>
+          row.periodId === period &&
+          selectedPlatforms.has(row.platformId) &&
+          selectedLeaves.has(row.region) &&
+          matchesCoreProduct(row.product, group.id, availableCoreProductGroups),
+      ),
+    );
+  }, [availableCoreProductGroups, data, period, selectedPlatforms, selectedLeaves]);
 
   const effectiveProduct =
-    product === PRODUCT_ALL || productOptions.includes(product) ? product : PRODUCT_ALL;
+    product === PRODUCT_ALL || productOptions.some((item) => item.id === product) ? product : PRODUCT_ALL;
+  const selectedCoreProduct = availableCoreProductGroups.find((item) => item.id === effectiveProduct);
 
   const current = useMemo(() => buildAggregate(data, period, platform, region, effectiveProduct), [data, period, platform, region, effectiveProduct]);
   const previous = useMemo(
@@ -1152,8 +1297,9 @@ function Dashboard({ data }: { data: DataShape }) {
         selectedPlatforms,
         selectedLeaves,
         effectiveProduct,
+        availableCoreProductGroups,
       ),
-    [channelSourceRows, period, selectedPlatforms, selectedLeaves, effectiveProduct],
+    [channelSourceRows, period, selectedPlatforms, selectedLeaves, effectiveProduct, availableCoreProductGroups],
   );
   const previousChannels = useMemo(
     () =>
@@ -1164,8 +1310,9 @@ function Dashboard({ data }: { data: DataShape }) {
         selectedPlatforms,
         selectedLeaves,
         effectiveProduct,
+        availableCoreProductGroups,
       ),
-    [channelSourceRows, data.metadata.previousPeriodId, selectedPlatforms, selectedLeaves, effectiveProduct],
+    [channelSourceRows, data.metadata.previousPeriodId, selectedPlatforms, selectedLeaves, effectiveProduct, availableCoreProductGroups],
   );
   const lastYearChannels = useMemo(
     () =>
@@ -1176,13 +1323,14 @@ function Dashboard({ data }: { data: DataShape }) {
         selectedPlatforms,
         selectedLeaves,
         effectiveProduct,
+        availableCoreProductGroups,
       ),
-    [channelSourceRows, data.metadata.lastYearPeriodId, selectedPlatforms, selectedLeaves, effectiveProduct],
+    [channelSourceRows, data.metadata.lastYearPeriodId, selectedPlatforms, selectedLeaves, effectiveProduct, availableCoreProductGroups],
   );
   const brands = useMemo(
     () =>
-      collectBreakdown(brandSourceRows, "brand", period, selectedPlatforms, selectedLeaves, effectiveProduct),
-    [brandSourceRows, period, selectedPlatforms, selectedLeaves, effectiveProduct],
+      collectBreakdown(brandSourceRows, "brand", period, selectedPlatforms, selectedLeaves, effectiveProduct, availableCoreProductGroups),
+    [brandSourceRows, period, selectedPlatforms, selectedLeaves, effectiveProduct, availableCoreProductGroups],
   );
   const merchants = useMemo(
     () =>
@@ -1193,8 +1341,9 @@ function Dashboard({ data }: { data: DataShape }) {
         selectedPlatforms,
         selectedLeaves,
         effectiveProduct,
+        availableCoreProductGroups,
       ),
-    [merchantSourceRows, period, selectedPlatforms, selectedLeaves, effectiveProduct],
+    [merchantSourceRows, period, selectedPlatforms, selectedLeaves, effectiveProduct, availableCoreProductGroups],
   );
   const previousBrands = useMemo(
     () =>
@@ -1205,8 +1354,9 @@ function Dashboard({ data }: { data: DataShape }) {
         selectedPlatforms,
         selectedLeaves,
         effectiveProduct,
+        availableCoreProductGroups,
       ),
-    [brandSourceRows, data.metadata.previousPeriodId, selectedPlatforms, selectedLeaves, effectiveProduct],
+    [brandSourceRows, data.metadata.previousPeriodId, selectedPlatforms, selectedLeaves, effectiveProduct, availableCoreProductGroups],
   );
   const lastYearBrands = useMemo(
     () =>
@@ -1217,12 +1367,49 @@ function Dashboard({ data }: { data: DataShape }) {
         selectedPlatforms,
         selectedLeaves,
         effectiveProduct,
+        availableCoreProductGroups,
       ),
-    [brandSourceRows, data.metadata.lastYearPeriodId, selectedPlatforms, selectedLeaves, effectiveProduct],
+    [brandSourceRows, data.metadata.lastYearPeriodId, selectedPlatforms, selectedLeaves, effectiveProduct, availableCoreProductGroups],
   );
   const activities = useMemo(
-    () => collectActivities(activitySourceRows, period, selectedPlatforms, selectedLeaves, effectiveProduct),
-    [activitySourceRows, period, selectedPlatforms, selectedLeaves, effectiveProduct],
+    () => collectActivities(activitySourceRows, period, selectedPlatforms, selectedLeaves, effectiveProduct, availableCoreProductGroups),
+    [activitySourceRows, period, selectedPlatforms, selectedLeaves, effectiveProduct, availableCoreProductGroups],
+  );
+  const coreSkuRows = useMemo(
+    () =>
+      collectCoreSkuRows(
+        data,
+        period,
+        selectedPlatforms,
+        selectedLeaves,
+        effectiveProduct,
+        availableCoreProductGroups,
+      ),
+    [data, period, selectedPlatforms, selectedLeaves, effectiveProduct, availableCoreProductGroups],
+  );
+  const previousCoreSkuRows = useMemo(
+    () =>
+      collectCoreSkuRows(
+        data,
+        data.metadata.previousPeriodId,
+        selectedPlatforms,
+        selectedLeaves,
+        effectiveProduct,
+        availableCoreProductGroups,
+      ),
+    [data, selectedPlatforms, selectedLeaves, effectiveProduct, availableCoreProductGroups],
+  );
+  const lastYearCoreSkuRows = useMemo(
+    () =>
+      collectCoreSkuRows(
+        data,
+        data.metadata.lastYearPeriodId,
+        selectedPlatforms,
+        selectedLeaves,
+        effectiveProduct,
+        availableCoreProductGroups,
+      ),
+    [data, selectedPlatforms, selectedLeaves, effectiveProduct, availableCoreProductGroups],
   );
   const scopeOptions = useMemo(() => buildScopeOptions(data, platform), [data, platform]);
   const coreMetricRows = useMemo(
@@ -1233,8 +1420,6 @@ function Dashboard({ data }: { data: DataShape }) {
         const rowLastYear = buildAggregate(data, data.metadata.lastYearPeriodId, scope.platform, region, effectiveProduct);
         const rowWow = comparisonEnabled ? compareAggregate(row, rowPrevious) : null;
         const rowYoy = comparisonEnabled ? compareAggregate(row, rowLastYear) : null;
-        const activityWow = comparisonEnabled ? compareValue(row.activityGmv, rowPrevious.activityGmv) : null;
-        const activityYoy = comparisonEnabled ? compareValue(row.activityGmv, rowLastYear.activityGmv) : null;
         const targetGap =
           row.targetAchievement !== null && row.timeProgress !== null
             ? row.targetAchievement - row.timeProgress
@@ -1264,10 +1449,10 @@ function Dashboard({ data }: { data: DataShape }) {
             tone: trendTone(targetGap) as "good" | "bad" | "neutral",
           },
           {
-            label: "活动GMV",
-            value: formatMoney(row.activityGmv),
-            sub: `环比${formatDelta(activityWow)} 同比${formatDelta(activityYoy)}`,
-            tone: trendTone(activityWow) as "good" | "bad" | "neutral",
+            label: "活动GMV占比",
+            value: formatPercent(row.activityShare),
+            sub: `活动GMV ${formatMoney(row.activityGmv)}`,
+            tone: row.activityShare !== null && row.activityShare >= 0.7 ? "warn" : "neutral",
           },
         ];
         return { ...scope, metrics };
@@ -1318,6 +1503,7 @@ function Dashboard({ data }: { data: DataShape }) {
           new Set(platformIds(data, scope.platform)),
           new Set(leavesFor(data, region)),
           effectiveProduct,
+          availableCoreProductGroups,
         )
           .slice(0, 8)
           .map((row) => ({
@@ -1337,13 +1523,15 @@ function Dashboard({ data }: { data: DataShape }) {
           promoFeeRows,
         };
       }),
-    [data, period, effectiveProduct, region, scopeOptions],
+    [data, period, effectiveProduct, region, scopeOptions, availableCoreProductGroups],
   );
   const selectedPlatformLabel =
     platform === PLATFORM_ALL
       ? "双平台合并"
       : data.metadata.platforms.find((item) => item.id === platform)?.label ?? platform;
-  const selectedProductLabel = effectiveProduct === PRODUCT_ALL ? "全部商品" : effectiveProduct;
+  const selectedProductLabel = effectiveProduct === PRODUCT_ALL ? "全部商品" : selectedCoreProduct?.label ?? effectiveProduct;
+  const narrativeProductLabel =
+    effectiveProduct === PRODUCT_ALL ? "年度核心单品" : selectedProductLabel;
   const selectedScopeLabel =
     effectiveProduct === PRODUCT_ALL ? selectedPlatformLabel : `${selectedPlatformLabel} · ${selectedProductLabel}`;
 
@@ -1359,6 +1547,9 @@ function Dashboard({ data }: { data: DataShape }) {
         channels,
         brands,
         merchants,
+        activities,
+        skuRows: coreSkuRows,
+        productLabel: narrativeProductLabel,
       }),
     [
       current,
@@ -1370,6 +1561,9 @@ function Dashboard({ data }: { data: DataShape }) {
       channels,
       brands,
       merchants,
+      activities,
+      coreSkuRows,
+      narrativeProductLabel,
     ],
   );
 
@@ -1429,12 +1623,12 @@ function Dashboard({ data }: { data: DataShape }) {
           </select>
         </div>
         <div className="control-group compact product-control">
-          <label htmlFor="product-select">商品名</label>
+          <label htmlFor="product-select">核心单品</label>
           <select id="product-select" value={effectiveProduct} onChange={(event) => setProduct(event.target.value)}>
             <option value={PRODUCT_ALL}>全部商品</option>
             {productOptions.map((item) => (
-              <option value={item} key={item}>
-                {item}
+              <option value={item.id} key={item.id}>
+                {item.label}
               </option>
             ))}
           </select>
@@ -1480,6 +1674,14 @@ function Dashboard({ data }: { data: DataShape }) {
               <h3>行动建议</h3>
               <ol className="narrative-list ordered">
                 {narrative.actions.map((item) => (
+                  <li key={item}>{item}</li>
+                ))}
+              </ol>
+            </article>
+            <article className="diagnostic-card playbook-card">
+              <h3>区域行动 Playbook</h3>
+              <ol className="narrative-list ordered">
+                {narrative.playbook.map((item) => (
                   <li key={item}>{item}</li>
                 ))}
               </ol>
@@ -1633,6 +1835,62 @@ function Dashboard({ data }: { data: DataShape }) {
               </tbody>
             </table>
           </div>
+        </Panel>
+      </section>
+
+      <section className="table-section">
+        <Panel
+          title="核心单品表"
+          kicker={`${selectedProductLabel === "全部商品" ? "年度核心单品SKU" : selectedProductLabel} · ${periodLabel(data, period).replace("WTD ", "")}`}
+        >
+          {coreSkuRows.length ? (
+            <div className="table-scroll">
+              <table className="metric-table core-product-table">
+                <thead>
+                  <tr>
+                    <th>SKU</th>
+                    <th>全量GMV</th>
+                    <th>{colLabel("全量GMV", "占比")}</th>
+                    <th>{colLabel("目标GMV", "达成率")}</th>
+                    <th>{colLabel("环比", "全量GMV")}</th>
+                    <th>{colLabel("同比", "全量GMV")}</th>
+                    <th>活动GMV</th>
+                    <th>活动GMV占比</th>
+                    <th>促销费用</th>
+                    <th>促销费比</th>
+                    <th>{colLabel("促销预算", "使用率")}</th>
+                    <th>活动折扣率</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {coreSkuRows.map((row) => {
+                    const prev = findNamed(previousCoreSkuRows, row.name);
+                    const last = findNamed(lastYearCoreSkuRows, row.name);
+                    const rowWow = prev ? compareAggregate(row, prev) : null;
+                    const rowYoy = last ? compareAggregate(row, last) : null;
+                    return (
+                      <tr key={row.name}>
+                        <th>{row.name}</th>
+                        <td>{formatMoney(row.gmv)}</td>
+                        <td>{formatPercent(safeRatio(row.gmv, current.gmv))}</td>
+                        <td>{formatPercent(row.targetAchievement)}</td>
+                        <td className={trendTone(rowWow)}>{formatDelta(rowWow)}</td>
+                        <td className={trendTone(rowYoy)}>{formatDelta(rowYoy)}</td>
+                        <td>{formatMoney(row.activityGmv)}</td>
+                        <td>{formatPercent(row.activityShare)}</td>
+                        <td>{formatMoney(row.subsidy)}</td>
+                        <td>{formatPercent(row.promoFeeRatio)}</td>
+                        <td>{formatPercent(row.promoBudgetUsage)}</td>
+                        <td>{formatPercent(row.activityDiscount)}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <div className="empty-state">当前筛选范围内没有命中的核心单品 SKU。</div>
+          )}
         </Panel>
       </section>
 

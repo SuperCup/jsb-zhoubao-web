@@ -139,6 +139,7 @@ CHANNEL_ALIASES = {
     "闪电仓": "仓店",
 }
 WUSU_MERCHANT_NAME = "乌苏啤酒/WUSU"
+DATE_COLUMN_CANDIDATES = ["日期", "账单时间", "业务发生时间", "订单时间", "订单完成时间"]
 
 
 def clean_number(value: Any) -> float:
@@ -180,13 +181,45 @@ def normalize_channel_fields(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+def normalize_date_field(df: pd.DataFrame) -> pd.DataFrame:
+    for column in DATE_COLUMN_CANDIDATES:
+        if column not in df.columns:
+            continue
+        values = df[column].astype(str).str.strip()
+        eight_digit = values.str.fullmatch(r"\d{8}")
+        parsed = pd.to_datetime(values.where(eight_digit), format="%Y%m%d", errors="coerce")
+        parsed = parsed.fillna(pd.to_datetime(values, errors="coerce"))
+        df["date"] = parsed.dt.strftime("%Y-%m-%d").fillna("未识别")
+        return df
+    df["date"] = "未识别"
+    return df
+
+
 def channel_sort_rank(channel: Any) -> int:
     name = str(channel)
     return CHANNEL_ORDER.index(name) if name in CHANNEL_ORDER else len(CHANNEL_ORDER)
 
 
+def period_date_offset(date_value: Any, period_id: str) -> int | None:
+    period = next((item for item in PERIODS if item["id"] == period_id), None)
+    if not period:
+        return None
+    try:
+        row_date = datetime.fromisoformat(str(date_value)).date()
+        start_date = datetime.fromisoformat(period["start"]).date()
+    except ValueError:
+        return None
+    return (row_date - start_date).days
+
+
+def matches_core_product_name(product: Any) -> bool:
+    name = str(product)
+    return any(re.search(group["matchPattern"], name, flags=re.IGNORECASE) for group in CORE_PRODUCT_GROUPS)
+
+
 def read_csv(path: Path) -> pd.DataFrame:
     df = pd.read_csv(path, encoding="utf-8-sig", low_memory=False)
+    df = normalize_date_field(df)
     for col in ["清洗_大区", "清洗_渠道", "清洗_品牌", "清洗_商户", "清洗_商品名"]:
         if col in df.columns:
             df[col] = df[col].fillna("未识别").astype(str).str.strip().replace("", "未识别")
@@ -338,15 +371,19 @@ def enrich_record(base: dict[str, Any]) -> dict[str, Any]:
 
 
 def add_comparisons(records: list[dict[str, Any]]) -> None:
-    by_key = {(r["platformId"], r["region"], r["periodId"]): r for r in records}
+    by_key = {
+        (r["platformId"], r["region"], r["periodId"], period_date_offset(r.get("date"), r["periodId"])): r
+        for r in records
+    }
     for record in records:
         if record["periodKind"] != "current":
             record["wowGmvChange"] = None
             record["yoyGmvChange"] = None
             record["promoFeeRatioChange"] = None
             continue
-        previous = by_key.get((record["platformId"], record["region"], PREVIOUS_PERIOD_ID))
-        last_year = by_key.get((record["platformId"], record["region"], LAST_YEAR_PERIOD_ID))
+        offset = period_date_offset(record.get("date"), record["periodId"])
+        previous = by_key.get((record["platformId"], record["region"], PREVIOUS_PERIOD_ID, offset))
+        last_year = by_key.get((record["platformId"], record["region"], LAST_YEAR_PERIOD_ID, offset))
         record["wowGmvChange"] = round_float(
             safe_div(record["gmv"] - previous["gmv"], previous["gmv"]) if previous else None
         )
@@ -373,7 +410,7 @@ def build_breakdown(
     top_n_per_region: int | None = None,
     product_scoped: bool = False,
 ) -> list[dict[str, Any]]:
-    group_cols = ["清洗_大区"]
+    group_cols = ["date", "清洗_大区"]
     if product_scoped:
         group_cols.append("清洗_商品名")
     group_cols.append(dimension_col)
@@ -390,12 +427,15 @@ def build_breakdown(
         region = str(row["region"])
         if region not in REGION_PARENT:
             continue
+        if product_scoped and not matches_core_product_name(row["product"]):
+            continue
         record = {
             "platformId": platform_id,
             "platformLabel": platform["label"],
             "periodId": period["id"],
             "periodLabel": period["label"],
             "periodKind": period["kind"],
+            "date": str(row["date"]),
             "region": region,
             "parent": REGION_PARENT[region],
             dimension_key: str(row[dimension_key]),
@@ -416,10 +456,10 @@ def build_breakdown(
 
     if top_n_per_region:
         limited: list[dict[str, Any]] = []
-        buckets: dict[tuple[str, str, str], list[dict[str, Any]]] = defaultdict(list)
+        buckets: dict[tuple[str, str, str, str, str], list[dict[str, Any]]] = defaultdict(list)
         for row in rows:
             product_key = row.get("product", "")
-            buckets[(row["platformId"], row["periodId"], row["region"], product_key)].append(row)
+            buckets[(row["platformId"], row["periodId"], row["region"], row["date"], product_key)].append(row)
         for bucket_rows in buckets.values():
             limited.extend(sorted(bucket_rows, key=lambda item: item["gmv"], reverse=True)[:top_n_per_region])
         return limited
@@ -435,7 +475,7 @@ def build_product_records(
     platform_target: dict[str, float],
     bu_budget: dict[tuple[str, int, str], dict[str, float]],
 ) -> list[dict[str, Any]]:
-    group_cols = ["清洗_大区", "清洗_商品名"]
+    group_cols = ["date", "清洗_大区", "清洗_商品名"]
     full = summarize_full(full_df, platform, group_cols)
     bill = summarize_bill(bill_df, platform, group_cols)
     merged = merge_metric_frames(full, bill, group_cols)
@@ -444,7 +484,7 @@ def build_product_records(
     for _, row in merged.iterrows():
         region = str(row["清洗_大区"])
         product = str(row["清洗_商品名"]).strip() or "未识别"
-        if region not in REGION_PARENT or product in {"nan", "None"}:
+        if region not in REGION_PARENT or product in {"nan", "None"} or not matches_core_product_name(product):
             continue
         budget_key = (platform["sourcePlatform"], period["monthKey"], region)
         budget = bu_budget.get(budget_key, {})
@@ -457,6 +497,7 @@ def build_product_records(
                     "periodId": period["id"],
                     "periodLabel": period["label"],
                     "periodKind": period["kind"],
+                    "date": str(row["date"]),
                     "monthKey": period["monthKey"],
                     "monthLabel": period["monthLabel"],
                     "timeProgress": period["timeProgress"],
@@ -495,7 +536,7 @@ def build_activity_breakdown(
     campaign_col = platform["billCampaignColumn"]
     if campaign_col not in bill_df.columns:
         return []
-    group_cols = ["清洗_大区"]
+    group_cols = ["date", "清洗_大区"]
     if product_scoped:
         group_cols.append("清洗_商品名")
     group_cols.append(campaign_col)
@@ -511,6 +552,8 @@ def build_activity_breakdown(
         activity_name = str(row["activityName"]).strip() or "未识别"
         if region not in REGION_PARENT or activity_name in {"nan", "None"}:
             continue
+        if product_scoped and not matches_core_product_name(row["product"]):
+            continue
         subsidy = clean_number(row.get("subsidy"))
         activity_gmv = clean_number(row.get("activityGmv"))
         rows.append(
@@ -520,6 +563,7 @@ def build_activity_breakdown(
                 "periodId": period["id"],
                 "periodLabel": period["label"],
                 "periodKind": period["kind"],
+                "date": str(row["date"]),
                 "region": region,
                 "parent": REGION_PARENT[region],
                 "activityName": activity_name,
@@ -533,10 +577,10 @@ def build_activity_breakdown(
         )
 
     limited: list[dict[str, Any]] = []
-    buckets: dict[tuple[str, str, str], list[dict[str, Any]]] = defaultdict(list)
+    buckets: dict[tuple[str, str, str, str, str], list[dict[str, Any]]] = defaultdict(list)
     for row in rows:
-        product_key = row.get("product", "")
-        buckets[(row["platformId"], row["periodId"], row["region"], product_key)].append(row)
+            product_key = row.get("product", "")
+            buckets[(row["platformId"], row["periodId"], row["region"], row["date"], product_key)].append(row)
     for bucket_rows in buckets.values():
         limited.extend(
             sorted(bucket_rows, key=lambda item: item["redemptionAmount"] or 0, reverse=True)[:top_n_per_region]
@@ -606,9 +650,9 @@ def build_data() -> dict[str, Any]:
             full_df = read_csv(full_path)
             bill_df = read_csv(bill_path)
 
-            full_region = summarize_full(full_df, platform, ["清洗_大区"])
-            bill_region = summarize_bill(bill_df, platform, ["清洗_大区"])
-            region_summary = merge_metric_frames(full_region, bill_region, ["清洗_大区"])
+            full_region = summarize_full(full_df, platform, ["date", "清洗_大区"])
+            bill_region = summarize_bill(bill_df, platform, ["date", "清洗_大区"])
+            region_summary = merge_metric_frames(full_region, bill_region, ["date", "清洗_大区"])
 
             target_key = (platform["sourcePlatform"], period["monthKey"])
             platform_target = platform_targets.get(target_key, {})
@@ -629,6 +673,7 @@ def build_data() -> dict[str, Any]:
                     "periodId": period["id"],
                     "periodLabel": period["label"],
                     "periodKind": period["kind"],
+                    "date": str(row["date"]),
                     "monthKey": period["monthKey"],
                     "monthLabel": period["monthLabel"],
                     "timeProgress": period["timeProgress"],
@@ -803,7 +848,7 @@ def write_logic_doc(data: dict[str, Any]) -> None:
 - 平台映射：前端展示 `淘宝闪购` 对应目标/预算表中的 `饿了么`；前端展示 `京东秒送` 对应目标/预算表中的 `京东到家`。
 - 区域字段：所有源表统一使用 `清洗_大区` 做区域匹配，使用脚本内置层级聚合为 `CBC`、`CIB`、`华中`、`NX`、`XJ`、`YN`。清洗后仍为空的记录保留在 `未识别`，不并入正式 BU。
 - 核心单品筛选字段：使用源表 `清洗_商品名`。会议中提到的 `一生装` 按业务口径识别为 `一升装（1L）`，匹配商品名中出现 `1L/１L` 的 SKU。网页默认展示全部商品，选择核心单品后，核心指标、AI诊断、Summary、区域表和下钻表按该核心单品重算。
-- 数据文件：核心数据输出到 `public/data/dashboard-data.json`，商品明细按平台拆分到 `public/data/product-data-*.json`，网页运行时合并加载，避免把大体量商品明细打入前端代码包或超过单文件限制。
+- 数据文件：核心数据输出到 `public/data/dashboard-data.json`，核心单品命中的商品明细按平台拆分到 `public/data/product-data-*.json`，网页运行时合并加载，避免把大体量商品明细打入前端代码包或超过单文件限制。
 
 ## 核心指标口径
 
@@ -830,6 +875,7 @@ def write_logic_doc(data: dict[str, Any]) -> None:
 
 - 周环比：当前周期 `0601-0607` 对比指定环比基准周期 `0501-0507`。
 - 同比：当前周期 `0601-0607` 对比去年同期 `25年0601-0607`。
+- 日期段筛选：源表日期统一清洗为 `date` 字段；选择当前周期内任意日期段时，当前周期、环比基准和去年同期按相同起止 offset 取数。例如选择 6.1-6.3 时，环比取 5.1-5.3，同比取 2025.6.1-6.3。
 - 月度目标达成率：`周期全量 GMV / 当月 BU 目标`。
 - 进度校正达成：`目标达成率 / 当月已过天数比例`。例如 6.1-6.7 使用 `7 / 30`。
 - 预算使用率：`促销费 / BU 预算`。

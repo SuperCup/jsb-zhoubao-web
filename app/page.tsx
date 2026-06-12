@@ -9,6 +9,7 @@ type MetricRow = {
   periodId: string;
   periodLabel: string;
   periodKind: string;
+  date?: string;
   monthLabel?: string;
   timeProgress?: number | null;
   region: string;
@@ -40,6 +41,7 @@ type ActivityRow = {
   periodId: string;
   periodLabel: string;
   periodKind: string;
+  date?: string;
   region: string;
   parent: string;
   product?: string;
@@ -87,6 +89,7 @@ type DataShape = {
       start: string;
       end: string;
       monthLabel: string;
+      daysInMonth?: number;
       timeProgress: number;
     }>;
     platforms: Array<{
@@ -121,6 +124,7 @@ type DataShape = {
 const PLATFORM_ALL = "all";
 const REGION_ALL = "all";
 const PRODUCT_ALL = "all";
+const DATE_RANGE_ALL = "all";
 const DATA_URL = "/data/dashboard-data.json";
 const DATA_DIR = "/data";
 const GROUP_ORDER = ["CBC", "CIB", "NX", "XJ", "YN", "华中", "未识别"];
@@ -140,6 +144,20 @@ type CoreProductGroup = {
   matchPattern: string;
   skuCount?: number;
   currentGmv?: number;
+};
+
+type DateRangeOption = {
+  id: string;
+  label: string;
+  startOffset: number;
+  endOffset: number;
+};
+
+const DEFAULT_DATE_RANGE: DateRangeOption = {
+  id: DATE_RANGE_ALL,
+  label: "全部日期",
+  startOffset: 0,
+  endOffset: 365,
 };
 
 const DEFAULT_CORE_PRODUCT_GROUPS: CoreProductGroup[] = [
@@ -241,6 +259,78 @@ function leavesFor(data: DataShape, region: string): string[] {
 function platformIds(data: DataShape, platform: string): string[] {
   if (platform === PLATFORM_ALL) return data.metadata.platforms.map((item) => item.id);
   return [platform];
+}
+
+function parseIsoDate(value: string): Date {
+  const [year, month, day] = value.split("-").map(Number);
+  return new Date(Date.UTC(year, month - 1, day));
+}
+
+function addDays(date: Date, days: number): Date {
+  return new Date(date.getTime() + days * 24 * 60 * 60 * 1000);
+}
+
+function dayDiff(from: Date, to: Date): number {
+  return Math.round((to.getTime() - from.getTime()) / (24 * 60 * 60 * 1000));
+}
+
+function formatMonthDayRange(start: Date, end: Date): string {
+  const startMonth = start.getUTCMonth() + 1;
+  const startDay = start.getUTCDate();
+  const endMonth = end.getUTCMonth() + 1;
+  const endDay = end.getUTCDate();
+  if (startMonth === endMonth && startDay === endDay) return `${startMonth}月${startDay}日`;
+  if (startMonth === endMonth) return `${startMonth}月${startDay}-${endDay}日`;
+  return `${startMonth}月${startDay}日-${endMonth}月${endDay}日`;
+}
+
+function currentPeriod(data: DataShape) {
+  return data.metadata.periods.find((item) => item.id === data.metadata.currentPeriodId);
+}
+
+function buildDateRangeOptions(data: DataShape): DateRangeOption[] {
+  const period = currentPeriod(data);
+  if (!period) return [{ id: DATE_RANGE_ALL, label: "全部日期", startOffset: 0, endOffset: 0 }];
+  const start = parseIsoDate(period.start);
+  const end = parseIsoDate(period.end);
+  const totalDays = dayDiff(start, end) + 1;
+  const options: DateRangeOption[] = [
+    {
+      id: DATE_RANGE_ALL,
+      label: `${formatMonthDayRange(start, end)}（全周期）`,
+      startOffset: 0,
+      endOffset: totalDays - 1,
+    },
+  ];
+  for (let startOffset = 0; startOffset < totalDays; startOffset += 1) {
+    for (let endOffset = startOffset; endOffset < totalDays; endOffset += 1) {
+      if (startOffset === 0 && endOffset === totalDays - 1) continue;
+      const rangeStart = addDays(start, startOffset);
+      const rangeEnd = addDays(start, endOffset);
+      options.push({
+        id: `${startOffset}-${endOffset}`,
+        label: formatMonthDayRange(rangeStart, rangeEnd),
+        startOffset,
+        endOffset,
+      });
+    }
+  }
+  return options;
+}
+
+function rangeTimeProgress(data: DataShape, periodId: string, dateRange: DateRangeOption): number | null {
+  const period = data.metadata.periods.find((item) => item.id === periodId);
+  if (!period) return null;
+  const selectedDays = dateRange.endOffset - dateRange.startOffset + 1;
+  return selectedDays > 0 ? selectedDays / (period.daysInMonth ?? selectedDays) : null;
+}
+
+function rowMatchesDateRange(data: DataShape, row: { periodId: string; date?: string }, dateRange: DateRangeOption): boolean {
+  if (!row.date) return true;
+  const period = data.metadata.periods.find((item) => item.id === row.periodId);
+  if (!period) return true;
+  const offset = dayDiff(parseIsoDate(period.start), parseIsoDate(row.date));
+  return offset >= dateRange.startOffset && offset <= dateRange.endOffset;
 }
 
 function coreProductGroups(data: DataShape): CoreProductGroup[] {
@@ -369,19 +459,30 @@ function buildAggregate(
   platform: string,
   region: string,
   product = PRODUCT_ALL,
+  dateRange: DateRangeOption = DEFAULT_DATE_RANGE,
 ): Aggregate {
   const selectedLeaves = new Set(leavesFor(data, region));
   const selectedPlatforms = new Set(platformIds(data, platform));
   const groups = coreProductGroups(data);
-  return aggregateRows(
+  const aggregate = aggregateRows(
     metricRowsForProduct(data, product).filter(
       (row) =>
         row.periodId === periodId &&
         selectedPlatforms.has(row.platformId) &&
         selectedLeaves.has(row.region) &&
+        rowMatchesDateRange(data, row, dateRange) &&
         matchesCoreProduct(row.product, product, groups),
     ),
   );
+  const timeProgress = rangeTimeProgress(data, periodId, dateRange);
+  return {
+    ...aggregate,
+    timeProgress,
+    paceAchievement:
+      aggregate.targetAchievement !== null && timeProgress
+        ? aggregate.targetAchievement / timeProgress
+        : null,
+  };
 }
 
 function formatMoney(value: number | null | undefined): string {
@@ -574,7 +675,7 @@ function buildScopeOptions(data: DataShape, platform: string): ScopeOption[] {
     return [
       {
         id: "merged",
-        label: "合并条件",
+        label: "双平台",
         platform: PLATFORM_ALL,
         variant: "merged",
       },
@@ -878,6 +979,7 @@ function promoRatioChange(current: Aggregate, baseline: Aggregate): number | nul
 type BreakdownKey = "channel" | "brand" | "merchant" | "product";
 
 function collectBreakdown(
+  data: DataShape,
   rows: BreakdownRow[],
   key: BreakdownKey,
   periodId: string,
@@ -885,6 +987,7 @@ function collectBreakdown(
   selectedLeaves: Set<string>,
   selectedProduct = PRODUCT_ALL,
   groups: CoreProductGroup[] = DEFAULT_CORE_PRODUCT_GROUPS,
+  dateRange: DateRangeOption = DEFAULT_DATE_RANGE,
 ) {
   const grouped = new Map<string, MetricRow[]>();
   rows
@@ -893,6 +996,7 @@ function collectBreakdown(
         row.periodId === periodId &&
         selectedPlatforms.has(row.platformId) &&
         selectedLeaves.has(row.region) &&
+        rowMatchesDateRange(data, row, dateRange) &&
         matchesCoreProduct(row.product, selectedProduct, groups),
     )
     .forEach((row) => {
@@ -918,12 +1022,14 @@ function collectBreakdown(
 }
 
 function collectActivities(
+  data: DataShape,
   rows: ActivityRow[],
   periodId: string,
   selectedPlatforms: Set<string>,
   selectedLeaves: Set<string>,
   selectedProduct = PRODUCT_ALL,
   groups: CoreProductGroup[] = DEFAULT_CORE_PRODUCT_GROUPS,
+  dateRange: DateRangeOption = DEFAULT_DATE_RANGE,
 ) {
   const grouped = new Map<
     string,
@@ -935,6 +1041,7 @@ function collectActivities(
         row.periodId === periodId &&
         selectedPlatforms.has(row.platformId) &&
         selectedLeaves.has(row.region) &&
+        rowMatchesDateRange(data, row, dateRange) &&
         matchesCoreProduct(row.product, selectedProduct, groups),
     )
     .forEach((row) => {
@@ -965,6 +1072,7 @@ function collectCoreSkuRows(
   selectedLeaves: Set<string>,
   selectedProduct: string,
   groups: CoreProductGroup[],
+  dateRange: DateRangeOption = DEFAULT_DATE_RANGE,
 ) {
   const grouped = new Map<string, MetricRow[]>();
   (data.productRecords ?? [])
@@ -973,6 +1081,7 @@ function collectCoreSkuRows(
         row.periodId === periodId &&
         selectedPlatforms.has(row.platformId) &&
         selectedLeaves.has(row.region) &&
+        rowMatchesDateRange(data, row, dateRange) &&
         (selectedProduct === PRODUCT_ALL
           ? matchesAnyCoreProduct(row.product, groups)
           : matchesCoreProduct(row.product, selectedProduct, groups)),
@@ -1307,10 +1416,13 @@ export default function Home() {
 
 function Dashboard({ data }: { data: DataShape }) {
   const [platform, setPlatform] = useState(PLATFORM_ALL);
+  const [dateRangeId, setDateRangeId] = useState(DATE_RANGE_ALL);
   const [region, setRegion] = useState(REGION_ALL);
   const [product, setProduct] = useState(PRODUCT_ALL);
   const period = data.metadata.currentPeriodId;
 
+  const dateRangeOptions = useMemo(() => buildDateRangeOptions(data), [data]);
+  const selectedDateRange = dateRangeOptions.find((item) => item.id === dateRangeId) ?? dateRangeOptions[0];
   const selectedLeaves = useMemo(() => new Set(leavesFor(data, region)), [data, region]);
   const selectedPlatforms = useMemo(() => new Set(platformIds(data, platform)), [data, platform]);
   const availableCoreProductGroups = useMemo(() => coreProductGroups(data), [data]);
@@ -1321,10 +1433,11 @@ function Dashboard({ data }: { data: DataShape }) {
           row.periodId === period &&
           selectedPlatforms.has(row.platformId) &&
           selectedLeaves.has(row.region) &&
+          rowMatchesDateRange(data, row, selectedDateRange) &&
           matchesCoreProduct(row.product, group.id, availableCoreProductGroups),
       ),
     );
-  }, [availableCoreProductGroups, data, period, selectedPlatforms, selectedLeaves]);
+  }, [availableCoreProductGroups, data, period, selectedPlatforms, selectedLeaves, selectedDateRange]);
 
   const effectiveProduct =
     product === PRODUCT_ALL || productOptions.some((item) => item.id === product) ? product : PRODUCT_ALL;
@@ -1333,14 +1446,17 @@ function Dashboard({ data }: { data: DataShape }) {
     selectedCoreProduct?.id !== "one_liter" &&
     !isOneLiterProduct(selectedCoreProduct?.label ?? effectiveProduct);
 
-  const current = useMemo(() => buildAggregate(data, period, platform, region, effectiveProduct), [data, period, platform, region, effectiveProduct]);
+  const current = useMemo(
+    () => buildAggregate(data, period, platform, region, effectiveProduct, selectedDateRange),
+    [data, period, platform, region, effectiveProduct, selectedDateRange],
+  );
   const previous = useMemo(
-    () => buildAggregate(data, data.metadata.previousPeriodId, platform, region, effectiveProduct),
-    [data, platform, region, effectiveProduct],
+    () => buildAggregate(data, data.metadata.previousPeriodId, platform, region, effectiveProduct, selectedDateRange),
+    [data, platform, region, effectiveProduct, selectedDateRange],
   );
   const lastYear = useMemo(
-    () => buildAggregate(data, data.metadata.lastYearPeriodId, platform, region, effectiveProduct),
-    [data, platform, region, effectiveProduct],
+    () => buildAggregate(data, data.metadata.lastYearPeriodId, platform, region, effectiveProduct, selectedDateRange),
+    [data, platform, region, effectiveProduct, selectedDateRange],
   );
 
   const comparisonEnabled = true;
@@ -1351,12 +1467,12 @@ function Dashboard({ data }: { data: DataShape }) {
 
   const regionRows = useMemo(() => {
     return regionTableNodes(data, region).map((node) => {
-      const currentRow = buildAggregate(data, period, platform, node, effectiveProduct);
-      const previousRow = buildAggregate(data, data.metadata.previousPeriodId, platform, node, effectiveProduct);
-      const lastYearRow = buildAggregate(data, data.metadata.lastYearPeriodId, platform, node, effectiveProduct);
+      const currentRow = buildAggregate(data, period, platform, node, effectiveProduct, selectedDateRange);
+      const previousRow = buildAggregate(data, data.metadata.previousPeriodId, platform, node, effectiveProduct, selectedDateRange);
+      const lastYearRow = buildAggregate(data, data.metadata.lastYearPeriodId, platform, node, effectiveProduct, selectedDateRange);
       return { node, current: currentRow, previous: previousRow, lastYear: lastYearRow };
     });
-  }, [data, period, platform, region, effectiveProduct]);
+  }, [data, period, platform, region, effectiveProduct, selectedDateRange]);
 
   const channelSourceRows = useMemo(
     () => (effectiveProduct === PRODUCT_ALL ? data.breakdowns.channels : data.breakdowns.channelsByProduct ?? []),
@@ -1378,6 +1494,7 @@ function Dashboard({ data }: { data: DataShape }) {
   const channels = useMemo(
     () =>
       collectBreakdown(
+        data,
         channelSourceRows,
         "channel",
         period,
@@ -1385,12 +1502,14 @@ function Dashboard({ data }: { data: DataShape }) {
         selectedLeaves,
         effectiveProduct,
         availableCoreProductGroups,
+        selectedDateRange,
       ),
-    [channelSourceRows, period, selectedPlatforms, selectedLeaves, effectiveProduct, availableCoreProductGroups],
+    [data, channelSourceRows, period, selectedPlatforms, selectedLeaves, effectiveProduct, availableCoreProductGroups, selectedDateRange],
   );
   const previousChannels = useMemo(
     () =>
       collectBreakdown(
+        data,
         channelSourceRows,
         "channel",
         data.metadata.previousPeriodId,
@@ -1398,12 +1517,14 @@ function Dashboard({ data }: { data: DataShape }) {
         selectedLeaves,
         effectiveProduct,
         availableCoreProductGroups,
+        selectedDateRange,
       ),
-    [channelSourceRows, data.metadata.previousPeriodId, selectedPlatforms, selectedLeaves, effectiveProduct, availableCoreProductGroups],
+    [data, channelSourceRows, selectedPlatforms, selectedLeaves, effectiveProduct, availableCoreProductGroups, selectedDateRange],
   );
   const lastYearChannels = useMemo(
     () =>
       collectBreakdown(
+        data,
         channelSourceRows,
         "channel",
         data.metadata.lastYearPeriodId,
@@ -1411,17 +1532,29 @@ function Dashboard({ data }: { data: DataShape }) {
         selectedLeaves,
         effectiveProduct,
         availableCoreProductGroups,
+        selectedDateRange,
       ),
-    [channelSourceRows, data.metadata.lastYearPeriodId, selectedPlatforms, selectedLeaves, effectiveProduct, availableCoreProductGroups],
+    [data, channelSourceRows, selectedPlatforms, selectedLeaves, effectiveProduct, availableCoreProductGroups, selectedDateRange],
   );
   const brands = useMemo(
     () =>
-      collectBreakdown(brandSourceRows, "brand", period, selectedPlatforms, selectedLeaves, effectiveProduct, availableCoreProductGroups),
-    [brandSourceRows, period, selectedPlatforms, selectedLeaves, effectiveProduct, availableCoreProductGroups],
+      collectBreakdown(
+        data,
+        brandSourceRows,
+        "brand",
+        period,
+        selectedPlatforms,
+        selectedLeaves,
+        effectiveProduct,
+        availableCoreProductGroups,
+        selectedDateRange,
+      ),
+    [data, brandSourceRows, period, selectedPlatforms, selectedLeaves, effectiveProduct, availableCoreProductGroups, selectedDateRange],
   );
   const merchants = useMemo(
     () =>
       collectBreakdown(
+        data,
         merchantSourceRows,
         "merchant",
         period,
@@ -1429,12 +1562,14 @@ function Dashboard({ data }: { data: DataShape }) {
         selectedLeaves,
         effectiveProduct,
         availableCoreProductGroups,
+        selectedDateRange,
       ),
-    [merchantSourceRows, period, selectedPlatforms, selectedLeaves, effectiveProduct, availableCoreProductGroups],
+    [data, merchantSourceRows, period, selectedPlatforms, selectedLeaves, effectiveProduct, availableCoreProductGroups, selectedDateRange],
   );
   const previousMerchants = useMemo(
     () =>
       collectBreakdown(
+        data,
         merchantSourceRows,
         "merchant",
         data.metadata.previousPeriodId,
@@ -1442,12 +1577,14 @@ function Dashboard({ data }: { data: DataShape }) {
         selectedLeaves,
         effectiveProduct,
         availableCoreProductGroups,
+        selectedDateRange,
       ),
-    [merchantSourceRows, data.metadata.previousPeriodId, selectedPlatforms, selectedLeaves, effectiveProduct, availableCoreProductGroups],
+    [data, merchantSourceRows, selectedPlatforms, selectedLeaves, effectiveProduct, availableCoreProductGroups, selectedDateRange],
   );
   const lastYearMerchants = useMemo(
     () =>
       collectBreakdown(
+        data,
         merchantSourceRows,
         "merchant",
         data.metadata.lastYearPeriodId,
@@ -1455,12 +1592,14 @@ function Dashboard({ data }: { data: DataShape }) {
         selectedLeaves,
         effectiveProduct,
         availableCoreProductGroups,
+        selectedDateRange,
       ),
-    [merchantSourceRows, data.metadata.lastYearPeriodId, selectedPlatforms, selectedLeaves, effectiveProduct, availableCoreProductGroups],
+    [data, merchantSourceRows, selectedPlatforms, selectedLeaves, effectiveProduct, availableCoreProductGroups, selectedDateRange],
   );
   const previousBrands = useMemo(
     () =>
       collectBreakdown(
+        data,
         brandSourceRows,
         "brand",
         data.metadata.previousPeriodId,
@@ -1468,12 +1607,14 @@ function Dashboard({ data }: { data: DataShape }) {
         selectedLeaves,
         effectiveProduct,
         availableCoreProductGroups,
+        selectedDateRange,
       ),
-    [brandSourceRows, data.metadata.previousPeriodId, selectedPlatforms, selectedLeaves, effectiveProduct, availableCoreProductGroups],
+    [data, brandSourceRows, selectedPlatforms, selectedLeaves, effectiveProduct, availableCoreProductGroups, selectedDateRange],
   );
   const lastYearBrands = useMemo(
     () =>
       collectBreakdown(
+        data,
         brandSourceRows,
         "brand",
         data.metadata.lastYearPeriodId,
@@ -1481,12 +1622,23 @@ function Dashboard({ data }: { data: DataShape }) {
         selectedLeaves,
         effectiveProduct,
         availableCoreProductGroups,
+        selectedDateRange,
       ),
-    [brandSourceRows, data.metadata.lastYearPeriodId, selectedPlatforms, selectedLeaves, effectiveProduct, availableCoreProductGroups],
+    [data, brandSourceRows, selectedPlatforms, selectedLeaves, effectiveProduct, availableCoreProductGroups, selectedDateRange],
   );
   const activities = useMemo(
-    () => collectActivities(activitySourceRows, period, selectedPlatforms, selectedLeaves, effectiveProduct, availableCoreProductGroups),
-    [activitySourceRows, period, selectedPlatforms, selectedLeaves, effectiveProduct, availableCoreProductGroups],
+    () =>
+      collectActivities(
+        data,
+        activitySourceRows,
+        period,
+        selectedPlatforms,
+        selectedLeaves,
+        effectiveProduct,
+        availableCoreProductGroups,
+        selectedDateRange,
+      ),
+    [data, activitySourceRows, period, selectedPlatforms, selectedLeaves, effectiveProduct, availableCoreProductGroups, selectedDateRange],
   );
   const coreSkuRows = useMemo(
     () =>
@@ -1497,8 +1649,9 @@ function Dashboard({ data }: { data: DataShape }) {
         selectedLeaves,
         effectiveProduct,
         availableCoreProductGroups,
+        selectedDateRange,
       ),
-    [data, period, selectedPlatforms, selectedLeaves, effectiveProduct, availableCoreProductGroups],
+    [data, period, selectedPlatforms, selectedLeaves, effectiveProduct, availableCoreProductGroups, selectedDateRange],
   );
   const previousCoreSkuRows = useMemo(
     () =>
@@ -1509,8 +1662,9 @@ function Dashboard({ data }: { data: DataShape }) {
         selectedLeaves,
         effectiveProduct,
         availableCoreProductGroups,
+        selectedDateRange,
       ),
-    [data, selectedPlatforms, selectedLeaves, effectiveProduct, availableCoreProductGroups],
+    [data, selectedPlatforms, selectedLeaves, effectiveProduct, availableCoreProductGroups, selectedDateRange],
   );
   const lastYearCoreSkuRows = useMemo(
     () =>
@@ -1521,16 +1675,31 @@ function Dashboard({ data }: { data: DataShape }) {
         selectedLeaves,
         effectiveProduct,
         availableCoreProductGroups,
+        selectedDateRange,
       ),
-    [data, selectedPlatforms, selectedLeaves, effectiveProduct, availableCoreProductGroups],
+    [data, selectedPlatforms, selectedLeaves, effectiveProduct, availableCoreProductGroups, selectedDateRange],
   );
   const scopeOptions = useMemo(() => buildScopeOptions(data, platform), [data, platform]);
   const coreMetricRows = useMemo(
     () =>
       scopeOptions.map((scope) => {
-        const row = buildAggregate(data, period, scope.platform, region, effectiveProduct);
-        const rowPrevious = buildAggregate(data, data.metadata.previousPeriodId, scope.platform, region, effectiveProduct);
-        const rowLastYear = buildAggregate(data, data.metadata.lastYearPeriodId, scope.platform, region, effectiveProduct);
+        const row = buildAggregate(data, period, scope.platform, region, effectiveProduct, selectedDateRange);
+        const rowPrevious = buildAggregate(
+          data,
+          data.metadata.previousPeriodId,
+          scope.platform,
+          region,
+          effectiveProduct,
+          selectedDateRange,
+        );
+        const rowLastYear = buildAggregate(
+          data,
+          data.metadata.lastYearPeriodId,
+          scope.platform,
+          region,
+          effectiveProduct,
+          selectedDateRange,
+        );
         const rowWow = comparisonEnabled ? compareAggregate(row, rowPrevious) : null;
         const rowYoy = comparisonEnabled ? compareAggregate(row, rowLastYear) : null;
         const targetGap =
@@ -1576,14 +1745,14 @@ function Dashboard({ data }: { data: DataShape }) {
         ];
         return { ...scope, metrics };
       }),
-    [comparisonEnabled, data, period, effectiveProduct, region, scopeOptions, includeTargetBudget],
+    [comparisonEnabled, data, period, effectiveProduct, region, scopeOptions, includeTargetBudget, selectedDateRange],
   );
   const summaryPanels = useMemo(
     () =>
       scopeOptions.map((scope) => {
         const regionNodes = regionTableNodes(data, region).filter((node) => node !== "总计");
         const regionSummaryRows = regionNodes.map((node) => {
-          const row = buildAggregate(data, period, scope.platform, node, effectiveProduct);
+          const row = buildAggregate(data, period, scope.platform, node, effectiveProduct, selectedDateRange);
           return {
             label: node,
             bar: row.gmv,
@@ -1595,7 +1764,7 @@ function Dashboard({ data }: { data: DataShape }) {
           };
         });
         const budgetSummaryRows = regionNodes.map((node) => {
-          const row = buildAggregate(data, period, scope.platform, node, effectiveProduct);
+          const row = buildAggregate(data, period, scope.platform, node, effectiveProduct, selectedDateRange);
           return {
             label: node,
             bar: row.subsidy,
@@ -1607,15 +1776,16 @@ function Dashboard({ data }: { data: DataShape }) {
           };
         });
         const promoFeeRows = regionNodes.map((node) => {
-          const row = buildAggregate(data, period, scope.platform, node, effectiveProduct);
+          const row = buildAggregate(data, period, scope.platform, node, effectiveProduct, selectedDateRange);
           return {
             label: node,
             bar: row.promoFeeRatio,
             barLabel: formatPercent(row.promoFeeRatio),
           };
         });
-        const scopeAggregate = buildAggregate(data, period, scope.platform, region, effectiveProduct);
+        const scopeAggregate = buildAggregate(data, period, scope.platform, region, effectiveProduct, selectedDateRange);
         const channelRows = collectBreakdown(
+          data,
           effectiveProduct === PRODUCT_ALL ? data.breakdowns.channels : data.breakdowns.channelsByProduct ?? [],
           "channel",
           period,
@@ -1623,6 +1793,7 @@ function Dashboard({ data }: { data: DataShape }) {
           new Set(leavesFor(data, region)),
           effectiveProduct,
           availableCoreProductGroups,
+          selectedDateRange,
         )
           .slice(0, 8)
           .map((row) => ({
@@ -1642,13 +1813,14 @@ function Dashboard({ data }: { data: DataShape }) {
           promoFeeRows,
         };
       }),
-    [data, period, effectiveProduct, region, scopeOptions, availableCoreProductGroups, includeTargetBudget],
+    [data, period, effectiveProduct, region, scopeOptions, availableCoreProductGroups, includeTargetBudget, selectedDateRange],
   );
   const selectedPlatformLabel =
     platform === PLATFORM_ALL
       ? "双平台合并"
       : data.metadata.platforms.find((item) => item.id === platform)?.label ?? platform;
   const selectedProductLabel = effectiveProduct === PRODUCT_ALL ? "全部商品" : selectedCoreProduct?.label ?? effectiveProduct;
+  const selectedDateLabel = selectedDateRange.label.replace("（全周期）", "");
   const narrativeProductLabel =
     effectiveProduct === PRODUCT_ALL ? "年度核心单品" : selectedProductLabel;
   const selectedScopeLabel =
@@ -1706,6 +1878,7 @@ function Dashboard({ data }: { data: DataShape }) {
           <h1>嘉士伯淘京周报数据看板</h1>
           <div className="header-meta">
             <span>{periodLabel(data, period)}</span>
+            <span>{selectedDateLabel}</span>
             <span>{selectedRegionLabel(region)}</span>
             <span>{selectedProductLabel}</span>
             <span>数据生成 {generated}</span>
@@ -1726,6 +1899,20 @@ function Dashboard({ data }: { data: DataShape }) {
               </SegmentButton>
             ))}
           </div>
+        </div>
+        <div className="control-group compact">
+          <label htmlFor="date-range-select">日期段</label>
+          <select
+            id="date-range-select"
+            value={selectedDateRange.id}
+            onChange={(event) => setDateRangeId(event.target.value)}
+          >
+            {dateRangeOptions.map((item) => (
+              <option value={item.id} key={item.id}>
+                {item.label}
+              </option>
+            ))}
+          </select>
         </div>
         <div className="control-group compact">
           <label htmlFor="region-select">区域</label>
@@ -1759,10 +1946,6 @@ function Dashboard({ data }: { data: DataShape }) {
       <section className="core-matrix">
         {coreMetricRows.map((row) => (
           <div className={`core-scope-row ${row.variant}`} key={row.id}>
-            <div className="core-scope-label">
-              <span>{row.label}</span>
-              <small>{row.variant === "merged" ? "双平台合并" : "平台条件"}</small>
-            </div>
             <div className={includeTargetBudget ? "core-metric-grid" : "core-metric-grid compact-target"}>
               {row.metrics.map((metric) => (
                 <CoreMetricCard key={`${row.id}-${metric.label}`} metric={metric} variant={row.variant} />
@@ -1773,7 +1956,7 @@ function Dashboard({ data }: { data: DataShape }) {
       </section>
 
       <section className="diagnostic-section">
-        <Panel title="AI诊断报告" kicker={`${selectedScopeLabel} · ${selectedRegionLabel(region)} · ${periodLabel(data, period)}`}>
+        <Panel title="AI诊断报告" kicker={`${selectedScopeLabel} · ${selectedRegionLabel(region)} · ${selectedDateLabel}`}>
           <div className="diagnostic-grid">
             <article className="diagnostic-card">
               <h3>结论</h3>
@@ -1812,13 +1995,13 @@ function Dashboard({ data }: { data: DataShape }) {
       </section>
 
       <section className="summary-section">
-        <Panel title="Summary" kicker="图形表达按当前筛选区分合并条件与平台条件">
+        <Panel title="Summary" kicker="图形表达按当前筛选区分双平台与单平台">
           <div className="summary-scope-stack">
             {summaryPanels.map((scope) => (
               <div className="summary-scope" key={scope.id}>
                 <div className="summary-scope-title">
                   <span>{scope.label}</span>
-                  <small>{periodLabel(data, period)} · {selectedRegionLabel(region)} · {selectedProductLabel}</small>
+                  <small>{selectedDateLabel} · {selectedRegionLabel(region)} · {selectedProductLabel}</small>
                 </div>
                 <div className="summary-chart-grid">
                   {includeTargetBudget ? (

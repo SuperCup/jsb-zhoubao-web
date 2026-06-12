@@ -122,7 +122,7 @@ select {
 
 .control-band {
   display: grid;
-  grid-template-columns: minmax(320px, 1.05fr) minmax(210px, 0.55fr) minmax(320px, 0.9fr);
+  grid-template-columns: minmax(300px, 1fr) minmax(180px, 0.55fr) minmax(210px, 0.55fr) minmax(300px, 0.85fr);
   gap: 12px;
   margin-bottom: 14px;
 }
@@ -178,44 +178,15 @@ select {
 }
 
 .core-scope-row {
-  display: grid;
-  grid-template-columns: minmax(118px, 168px) minmax(0, 1fr);
-  gap: 12px;
+  display: block;
 }
 
-.core-scope-label,
 .core-metric-card,
 .panel {
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--surface);
   box-shadow: var(--shadow);
-}
-
-.core-scope-label {
-  display: grid;
-  align-content: center;
-  gap: 8px;
-  min-height: 150px;
-  padding: 16px;
-  border-left: 4px solid #1f2a44;
-}
-
-.core-scope-row.platform .core-scope-label {
-  border-left-color: var(--blue);
-}
-
-.core-scope-label span {
-  color: var(--ink);
-  font-size: 20px;
-  font-weight: 850;
-  line-height: 1.15;
-}
-
-.core-scope-label small {
-  color: var(--muted);
-  font-size: 12px;
-  font-weight: 800;
 }
 
 .core-metric-grid {
@@ -930,11 +901,6 @@ select {
     grid-template-columns: 1fr;
   }
 
-  .core-scope-row {
-    grid-template-columns: 1fr;
-  }
-
-  .core-scope-label,
   .core-metric-card {
     min-height: 120px;
   }

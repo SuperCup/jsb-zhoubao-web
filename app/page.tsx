@@ -125,8 +125,8 @@ const PLATFORM_ALL = "all";
 const REGION_ALL = "all";
 const PRODUCT_ALL = "all";
 const DATE_RANGE_ALL = "all";
-const DATA_URL = "/data/dashboard-data.json";
-const DATA_DIR = "/data";
+const DATA_URL = "data/dashboard-data.json";
+const DATA_DIR = "data";
 const GROUP_ORDER = ["CBC", "CIB", "NX", "XJ", "YN", "华中", "未识别"];
 const CHANNEL_ORDER = [
   "酒类专营店",

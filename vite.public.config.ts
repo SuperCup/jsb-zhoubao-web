@@ -3,6 +3,7 @@ import { defineConfig } from "vite";
 
 export default defineConfig({
   plugins: [react()],
+  base: process.env.PUBLIC_BASE_PATH ?? "/",
   root: "public-spa",
   publicDir: "../public",
   build: {

@@ -24,20 +24,24 @@ OUTPUT_JSON = Path(
 )
 LOGIC_DOC = Path(os.environ.get("LOGIC_DOC", WORKSPACE / "docs" / "取数逻辑说明.md"))
 
+CURRENT_PERIOD_ID = "0601-0607"
+PREVIOUS_PERIOD_ID = "0501-0507"
+LAST_YEAR_PERIOD_ID = "25年0601-0607"
+
 
 PERIODS = [
     {
-        "id": "0525-0531",
-        "label": "WTD 5.25-5.31",
-        "shortLabel": "5.25-5.31",
+        "id": PREVIOUS_PERIOD_ID,
+        "label": "WTD 5.1-5.7",
+        "shortLabel": "5.1-5.7",
         "kind": "previous",
-        "start": "2026-05-25",
-        "end": "2026-05-31",
+        "start": "2026-05-01",
+        "end": "2026-05-07",
         "monthKey": 202605,
         "monthLabel": "2026年5月",
     },
     {
-        "id": "0601-0607",
+        "id": CURRENT_PERIOD_ID,
         "label": "WTD 6.1-6.7",
         "shortLabel": "6.1-6.7",
         "kind": "current",
@@ -47,7 +51,7 @@ PERIODS = [
         "monthLabel": "2026年6月",
     },
     {
-        "id": "25年0601-0607",
+        "id": LAST_YEAR_PERIOD_ID,
         "label": "去年同期 6.1-6.7",
         "shortLabel": "2025 6.1-6.7",
         "kind": "last_year",
@@ -318,8 +322,8 @@ def add_comparisons(records: list[dict[str, Any]]) -> None:
             record["yoyGmvChange"] = None
             record["promoFeeRatioChange"] = None
             continue
-        previous = by_key.get((record["platformId"], record["region"], "0525-0531"))
-        last_year = by_key.get((record["platformId"], record["region"], "25年0601-0607"))
+        previous = by_key.get((record["platformId"], record["region"], PREVIOUS_PERIOD_ID))
+        last_year = by_key.get((record["platformId"], record["region"], LAST_YEAR_PERIOD_ID))
         record["wowGmvChange"] = round_float(
             safe_div(record["gmv"] - previous["gmv"], previous["gmv"]) if previous else None
         )
@@ -689,7 +693,7 @@ def build_data() -> dict[str, Any]:
     add_comparisons(records)
     product_totals: dict[str, float] = defaultdict(float)
     for row in product_records:
-        if row["periodId"] == "0601-0607" and row.get("product"):
+        if row["periodId"] == CURRENT_PERIOD_ID and row.get("product"):
             product_totals[str(row["product"])] += row.get("gmv", 0) or 0
     core_product_groups: list[dict[str, Any]] = []
     for group in CORE_PRODUCT_GROUPS:
@@ -697,7 +701,7 @@ def build_data() -> dict[str, Any]:
         matched_skus = {
             str(row.get("product"))
             for row in product_records
-            if row["periodId"] == "0601-0607"
+            if row["periodId"] == CURRENT_PERIOD_ID
             and row.get("product")
             and pattern.search(str(row.get("product")))
         }
@@ -716,9 +720,9 @@ def build_data() -> dict[str, Any]:
             "title": "嘉士伯淘京周报数据看板",
             "generatedAt": datetime.now().isoformat(timespec="seconds"),
             "sourceRoot": str(SOURCE_DIR),
-            "currentPeriodId": "0601-0607",
-            "previousPeriodId": "0525-0531",
-            "lastYearPeriodId": "25年0601-0607",
+            "currentPeriodId": CURRENT_PERIOD_ID,
+            "previousPeriodId": PREVIOUS_PERIOD_ID,
+            "lastYearPeriodId": LAST_YEAR_PERIOD_ID,
             "periods": periods,
             "platforms": [
                 {"id": platform_id, **platform}
@@ -767,8 +771,8 @@ def write_logic_doc(data: dict[str, Any]) -> None:
 ## 数据源
 
 - 源目录：`{SOURCE_DIR}`
-- 周期：`0525-0531`、`0601-0607`、`25年0601-0607`
-- 页面默认展示目标分析周期 `0601-0607`，不提供周期筛选；`0525-0531` 仅用于环比参照，`25年0601-0607` 仅用于同比参照。
+- 周期：`0501-0507`、`0601-0607`、`25年0601-0607`
+- 页面默认展示目标分析周期 `0601-0607`，不提供周期筛选；`0501-0507` 仅用于环比参照，`25年0601-0607` 仅用于同比参照。
 - 平台映射：前端展示 `淘宝闪购` 对应目标/预算表中的 `饿了么`；前端展示 `京东秒送` 对应目标/预算表中的 `京东到家`。
 - 区域字段：所有源表统一使用 `清洗_大区` 做区域匹配，使用脚本内置层级聚合为 `CBC`、`CIB`、`华中`、`NX`、`XJ`、`YN`。清洗后仍为空的记录保留在 `未识别`，不并入正式 BU。
 - 核心单品筛选字段：使用源表 `清洗_商品名`。会议中提到的 `一生装` 按业务口径识别为 `一升装（1L）`，匹配商品名中出现 `1L/１L` 的 SKU。网页默认展示全部商品，选择核心单品后，核心指标、AI诊断、Summary、区域表和下钻表按该核心单品重算。
@@ -797,7 +801,7 @@ def write_logic_doc(data: dict[str, Any]) -> None:
 
 ## 对比逻辑
 
-- 周环比：当前周期 `0601-0607` 对比上一周期 `0525-0531`。
+- 周环比：当前周期 `0601-0607` 对比指定环比基准周期 `0501-0507`。
 - 同比：当前周期 `0601-0607` 对比去年同期 `25年0601-0607`。
 - 月度目标达成率：`周期全量 GMV / 当月 BU 目标`。
 - 进度校正达成：`目标达成率 / 当月已过天数比例`。例如 6.1-6.7 使用 `7 / 30`。

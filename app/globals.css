@@ -779,21 +779,6 @@ select {
   padding-top: 12px;
 }
 
-.subtable-block {
-  display: grid;
-  gap: 10px;
-  margin-top: 14px;
-  border-top: 1px solid var(--line);
-  padding-top: 14px;
-}
-
-.subtable-title h3 {
-  margin: 0;
-  color: var(--ink);
-  font-size: 15px;
-  line-height: 1.3;
-}
-
 .table-scroll {
   overflow-x: auto;
   overflow-y: hidden;

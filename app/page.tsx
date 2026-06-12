@@ -1889,62 +1889,11 @@ function Dashboard({ data }: { data: DataShape }) {
               </tbody>
             </table>
           </div>
-          <div className="subtable-block">
-            <div className="subtable-title">
-              <h3>TOP10零售商表</h3>
-            </div>
-            {merchants.length ? (
-              <div className="table-scroll">
-                <table className="metric-table">
-                  <thead>
-                    <tr>
-                      <th>零售商</th>
-                      <th>全量GMV</th>
-                      <th>{colLabel("全量GMV", "占比")}</th>
-                      <th>{colLabel("环比", "全量GMV")}</th>
-                      <th>{colLabel("同比", "全量GMV")}</th>
-                      <th>活动GMV</th>
-                      <th>活动GMV占比</th>
-                      <th>促销费用</th>
-                      <th>{colLabel("环比", "促销费比")}</th>
-                      <th>{colLabel("同比", "促销费比")}</th>
-                      <th>促销费比</th>
-                      <th>活动折扣率</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {merchants.slice(0, 10).map((row) => {
-                      const prev = findNamed(previousMerchants, row.name);
-                      const last = findNamed(lastYearMerchants, row.name);
-                      return (
-                        <tr key={row.name}>
-                          <th>{row.name}</th>
-                          <td>{formatMoney(row.gmv)}</td>
-                          <td>{formatPercent(safeRatio(row.gmv, current.gmv))}</td>
-                          <td className={trendTone(prev ? compareAggregate(row, prev) : null)}>{formatDelta(prev ? compareAggregate(row, prev) : null)}</td>
-                          <td className={trendTone(last ? compareAggregate(row, last) : null)}>{formatDelta(last ? compareAggregate(row, last) : null)}</td>
-                          <td>{formatMoney(row.activityGmv)}</td>
-                          <td>{formatPercent(row.activityShare)}</td>
-                          <td>{formatMoney(row.subsidy)}</td>
-                          <td className={trendTone(prev ? promoRatioChange(row, prev) : null, true)}>{formatPointDelta(prev ? promoRatioChange(row, prev) : null)}</td>
-                          <td className={trendTone(last ? promoRatioChange(row, last) : null, true)}>{formatPointDelta(last ? promoRatioChange(row, last) : null)}</td>
-                          <td>{formatPercent(row.promoFeeRatio)}</td>
-                          <td>{formatPercent(row.activityDiscount)}</td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            ) : (
-              <div className="empty-state">当前筛选范围内没有可展示的零售商数据。</div>
-            )}
-          </div>
         </Panel>
       </section>
 
       <section className="table-section">
-        <Panel title="区域周报" kicker="MTD 与 WTD 字段、顺序按 Excel 对齐；点击区域可下钻">
+        <Panel title="区域表" kicker="MTD 与 WTD 字段、顺序按 Excel 对齐；点击区域可下钻">
           <div className="table-scroll">
             <table className="metric-table region-weekly-table">
               <thead>
@@ -1999,6 +1948,145 @@ function Dashboard({ data }: { data: DataShape }) {
                       <td>{formatMoney(row.activityGmv)}</td>
                       <td>{formatPercent(row.activityShare)}</td>
                       <td>{formatPercent(row.promoFeeRatio)}</td>
+                      <td>{formatPercent(row.activityDiscount)}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </Panel>
+      </section>
+
+      <section className="detail-grid">
+        <Panel title="渠道表" kicker={`WTD（${periodLabel(data, period).replace("WTD ", "")}）`}>
+          <div className="table-scroll">
+            <table className="metric-table">
+              <thead>
+                <tr>
+                  <th>渠道</th>
+                  <th>全量GMV</th>
+                  <th>{colLabel("全量GMV", "占比")}</th>
+                  <th>{colLabel("环比", "全量GMV")}</th>
+                  <th>{colLabel("同比", "全量GMV")}</th>
+                  <th>活动GMV</th>
+                  <th>活动GMV占比</th>
+                  <th>促销费用</th>
+                  <th>{colLabel("环比", "促销费比")}</th>
+                  <th>{colLabel("同比", "促销费比")}</th>
+                  <th>促销费比</th>
+                  <th>活动折扣率</th>
+                </tr>
+              </thead>
+              <tbody>
+                {channels.slice(0, 12).map((row) => {
+                  const prev = findNamed(previousChannels, row.name);
+                  const last = findNamed(lastYearChannels, row.name);
+                  return (
+                    <tr key={row.name}>
+                      <th>{row.name}</th>
+                      <td>{formatMoney(row.gmv)}</td>
+                      <td>{formatPercent(safeRatio(row.gmv, current.gmv))}</td>
+                      <td className={trendTone(compareAggregate(row, prev ?? aggregateRows([])))}>{formatDelta(prev ? compareAggregate(row, prev) : null)}</td>
+                      <td className={trendTone(compareAggregate(row, last ?? aggregateRows([])))}>{formatDelta(last ? compareAggregate(row, last) : null)}</td>
+                      <td>{formatMoney(row.activityGmv)}</td>
+                      <td>{formatPercent(row.activityShare)}</td>
+                      <td>{formatMoney(row.subsidy)}</td>
+                      <td className={trendTone(prev ? promoRatioChange(row, prev) : null, true)}>{formatPointDelta(prev ? promoRatioChange(row, prev) : null)}</td>
+                      <td className={trendTone(last ? promoRatioChange(row, last) : null, true)}>{formatPointDelta(last ? promoRatioChange(row, last) : null)}</td>
+                      <td>{formatPercent(row.promoFeeRatio)}</td>
+                      <td>{formatPercent(row.activityDiscount)}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </Panel>
+      </section>
+
+      <section className="detail-grid">
+        <Panel title="TOP10零售商表" kicker={`WTD（${periodLabel(data, period).replace("WTD ", "")}）`}>
+          {merchants.length ? (
+            <div className="table-scroll">
+              <table className="metric-table">
+                <thead>
+                  <tr>
+                    <th>零售商</th>
+                    <th>全量GMV</th>
+                    <th>{colLabel("全量GMV", "占比")}</th>
+                    <th>{colLabel("环比", "全量GMV")}</th>
+                    <th>{colLabel("同比", "全量GMV")}</th>
+                    <th>活动GMV</th>
+                    <th>活动GMV占比</th>
+                    <th>促销费用</th>
+                    <th>{colLabel("环比", "促销费比")}</th>
+                    <th>{colLabel("同比", "促销费比")}</th>
+                    <th>促销费比</th>
+                    <th>活动折扣率</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {merchants.slice(0, 10).map((row) => {
+                    const prev = findNamed(previousMerchants, row.name);
+                    const last = findNamed(lastYearMerchants, row.name);
+                    return (
+                      <tr key={row.name}>
+                        <th>{row.name}</th>
+                        <td>{formatMoney(row.gmv)}</td>
+                        <td>{formatPercent(safeRatio(row.gmv, current.gmv))}</td>
+                        <td className={trendTone(prev ? compareAggregate(row, prev) : null)}>{formatDelta(prev ? compareAggregate(row, prev) : null)}</td>
+                        <td className={trendTone(last ? compareAggregate(row, last) : null)}>{formatDelta(last ? compareAggregate(row, last) : null)}</td>
+                        <td>{formatMoney(row.activityGmv)}</td>
+                        <td>{formatPercent(row.activityShare)}</td>
+                        <td>{formatMoney(row.subsidy)}</td>
+                        <td className={trendTone(prev ? promoRatioChange(row, prev) : null, true)}>{formatPointDelta(prev ? promoRatioChange(row, prev) : null)}</td>
+                        <td className={trendTone(last ? promoRatioChange(row, last) : null, true)}>{formatPointDelta(last ? promoRatioChange(row, last) : null)}</td>
+                        <td>{formatPercent(row.promoFeeRatio)}</td>
+                        <td>{formatPercent(row.activityDiscount)}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <div className="empty-state">当前筛选范围内没有可展示的零售商数据。</div>
+          )}
+        </Panel>
+      </section>
+
+      <section className="detail-grid">
+        <Panel title="品牌表" kicker={`GMV表现（${periodLabel(data, period).replace("WTD ", "")}）`}>
+          <div className="table-scroll">
+            <table className="metric-table">
+              <thead>
+                <tr>
+                  <th>品牌</th>
+                  <th>全量GMV</th>
+                  <th>费比</th>
+                  <th>{colLabel("环比", "全量GMV")}</th>
+                  <th>{colLabel("同比", "全量GMV")}</th>
+                  <th>{colLabel("全量GMV", "占比")}</th>
+                  <th>活动GMV</th>
+                  <th>活动GMV占比</th>
+                  <th>活动折扣率</th>
+                </tr>
+              </thead>
+              <tbody>
+                {brands.slice(0, 14).map((row) => {
+                  const prev = findNamed(previousBrands, row.name);
+                  const last = findNamed(lastYearBrands, row.name);
+                  return (
+                    <tr key={row.name}>
+                      <th>{row.name}</th>
+                      <td>{formatMoney(row.gmv)}</td>
+                      <td>{formatPercent(row.promoFeeRatio)}</td>
+                      <td className={trendTone(prev ? compareAggregate(row, prev) : null)}>{formatDelta(prev ? compareAggregate(row, prev) : null)}</td>
+                      <td className={trendTone(last ? compareAggregate(row, last) : null)}>{formatDelta(last ? compareAggregate(row, last) : null)}</td>
+                      <td>{formatPercent(safeRatio(row.gmv, current.gmv))}</td>
+                      <td>{formatMoney(row.activityGmv)}</td>
+                      <td>{formatPercent(row.activityShare)}</td>
                       <td>{formatPercent(row.activityDiscount)}</td>
                     </tr>
                   );
@@ -2066,95 +2154,7 @@ function Dashboard({ data }: { data: DataShape }) {
       </section>
 
       <section className="detail-grid">
-        <Panel title="嘉士伯渠道" kicker={`WTD（${periodLabel(data, period).replace("WTD ", "")}）`}>
-          <div className="table-scroll">
-            <table className="metric-table">
-              <thead>
-                <tr>
-                  <th>嘉士伯渠道</th>
-                  <th>全量GMV</th>
-                  <th>{colLabel("全量GMV", "占比")}</th>
-                  <th>{colLabel("环比", "全量GMV")}</th>
-                  <th>{colLabel("同比", "全量GMV")}</th>
-                  <th>活动GMV</th>
-                  <th>活动GMV占比</th>
-                  <th>促销费用</th>
-                  <th>{colLabel("环比", "促销费比")}</th>
-                  <th>{colLabel("同比", "促销费比")}</th>
-                  <th>促销费比</th>
-                  <th>活动折扣率</th>
-                </tr>
-              </thead>
-              <tbody>
-                {channels.slice(0, 12).map((row) => {
-                  const prev = findNamed(previousChannels, row.name);
-                  const last = findNamed(lastYearChannels, row.name);
-                  return (
-                    <tr key={row.name}>
-                      <th>{row.name}</th>
-                      <td>{formatMoney(row.gmv)}</td>
-                      <td>{formatPercent(safeRatio(row.gmv, current.gmv))}</td>
-                      <td className={trendTone(compareAggregate(row, prev ?? aggregateRows([])))}>{formatDelta(prev ? compareAggregate(row, prev) : null)}</td>
-                      <td className={trendTone(compareAggregate(row, last ?? aggregateRows([])))}>{formatDelta(last ? compareAggregate(row, last) : null)}</td>
-                      <td>{formatMoney(row.activityGmv)}</td>
-                      <td>{formatPercent(row.activityShare)}</td>
-                      <td>{formatMoney(row.subsidy)}</td>
-                      <td className={trendTone(prev ? promoRatioChange(row, prev) : null, true)}>{formatPointDelta(prev ? promoRatioChange(row, prev) : null)}</td>
-                      <td className={trendTone(last ? promoRatioChange(row, last) : null, true)}>{formatPointDelta(last ? promoRatioChange(row, last) : null)}</td>
-                      <td>{formatPercent(row.promoFeeRatio)}</td>
-                      <td>{formatPercent(row.activityDiscount)}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </Panel>
-      </section>
-
-      <section className="detail-grid">
-        <Panel title="品牌" kicker={`GMV表现（${periodLabel(data, period).replace("WTD ", "")}）`}>
-          <div className="table-scroll">
-            <table className="metric-table">
-              <thead>
-                <tr>
-                  <th>品牌</th>
-                  <th>全量GMV</th>
-                  <th>费比</th>
-                  <th>{colLabel("环比", "全量GMV")}</th>
-                  <th>{colLabel("同比", "全量GMV")}</th>
-                  <th>{colLabel("全量GMV", "占比")}</th>
-                  <th>活动GMV</th>
-                  <th>活动GMV占比</th>
-                  <th>活动折扣率</th>
-                </tr>
-              </thead>
-              <tbody>
-                {brands.slice(0, 14).map((row) => {
-                  const prev = findNamed(previousBrands, row.name);
-                  const last = findNamed(lastYearBrands, row.name);
-                  return (
-                    <tr key={row.name}>
-                      <th>{row.name}</th>
-                      <td>{formatMoney(row.gmv)}</td>
-                      <td>{formatPercent(row.promoFeeRatio)}</td>
-                      <td className={trendTone(prev ? compareAggregate(row, prev) : null)}>{formatDelta(prev ? compareAggregate(row, prev) : null)}</td>
-                      <td className={trendTone(last ? compareAggregate(row, last) : null)}>{formatDelta(last ? compareAggregate(row, last) : null)}</td>
-                      <td>{formatPercent(safeRatio(row.gmv, current.gmv))}</td>
-                      <td>{formatMoney(row.activityGmv)}</td>
-                      <td>{formatPercent(row.activityShare)}</td>
-                      <td>{formatPercent(row.activityDiscount)}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </Panel>
-      </section>
-
-      <section className="detail-grid">
-        <Panel title="活动名称" kicker={`WTD（${periodLabel(data, period).replace("WTD ", "")}）`}>
+        <Panel title="活动表" kicker={`WTD（${periodLabel(data, period).replace("WTD ", "")}）`}>
           <div className="table-scroll">
             <table className="metric-table">
               <thead>

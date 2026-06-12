@@ -171,6 +171,19 @@ select {
   background: var(--surface);
 }
 
+.range-selects {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+}
+
+.range-selects span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
 .core-matrix {
   display: grid;
   gap: 12px;
@@ -912,6 +925,14 @@ select {
 
   .segments {
     grid-template-columns: 1fr;
+  }
+
+  .range-selects {
+    grid-template-columns: 1fr;
+  }
+
+  .range-selects span {
+    display: none;
   }
 
   .region-row {

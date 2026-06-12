@@ -153,6 +153,11 @@ type DateRangeOption = {
   endOffset: number;
 };
 
+type DateDayOption = {
+  offset: number;
+  label: string;
+};
+
 const DEFAULT_DATE_RANGE: DateRangeOption = {
   id: DATE_RANGE_ALL,
   label: "全部日期",
@@ -288,34 +293,35 @@ function currentPeriod(data: DataShape) {
   return data.metadata.periods.find((item) => item.id === data.metadata.currentPeriodId);
 }
 
-function buildDateRangeOptions(data: DataShape): DateRangeOption[] {
+function buildDateDayOptions(data: DataShape): DateDayOption[] {
   const period = currentPeriod(data);
-  if (!period) return [{ id: DATE_RANGE_ALL, label: "全部日期", startOffset: 0, endOffset: 0 }];
+  if (!period) return [{ offset: 0, label: "全部日期" }];
   const start = parseIsoDate(period.start);
   const end = parseIsoDate(period.end);
   const totalDays = dayDiff(start, end) + 1;
-  const options: DateRangeOption[] = [
-    {
-      id: DATE_RANGE_ALL,
-      label: `${formatMonthDayRange(start, end)}（全周期）`,
-      startOffset: 0,
-      endOffset: totalDays - 1,
-    },
-  ];
-  for (let startOffset = 0; startOffset < totalDays; startOffset += 1) {
-    for (let endOffset = startOffset; endOffset < totalDays; endOffset += 1) {
-      if (startOffset === 0 && endOffset === totalDays - 1) continue;
-      const rangeStart = addDays(start, startOffset);
-      const rangeEnd = addDays(start, endOffset);
-      options.push({
-        id: `${startOffset}-${endOffset}`,
-        label: formatMonthDayRange(rangeStart, rangeEnd),
-        startOffset,
-        endOffset,
-      });
-    }
+  const options: DateDayOption[] = [];
+  for (let offset = 0; offset < totalDays; offset += 1) {
+    const date = addDays(start, offset);
+    options.push({
+      offset,
+      label: formatMonthDayRange(date, date),
+    });
   }
   return options;
+}
+
+function buildSelectedDateRange(data: DataShape, startOffset: number, endOffset: number): DateRangeOption {
+  const period = currentPeriod(data);
+  if (!period) return DEFAULT_DATE_RANGE;
+  const start = parseIsoDate(period.start);
+  const rangeStart = addDays(start, startOffset);
+  const rangeEnd = addDays(start, endOffset);
+  return {
+    id: `${startOffset}-${endOffset}`,
+    label: formatMonthDayRange(rangeStart, rangeEnd),
+    startOffset,
+    endOffset,
+  };
 }
 
 function rangeTimeProgress(data: DataShape, periodId: string, dateRange: DateRangeOption): number | null {
@@ -1416,13 +1422,23 @@ export default function Home() {
 
 function Dashboard({ data }: { data: DataShape }) {
   const [platform, setPlatform] = useState(PLATFORM_ALL);
-  const [dateRangeId, setDateRangeId] = useState(DATE_RANGE_ALL);
+  const [dateStartOffset, setDateStartOffset] = useState(0);
+  const [dateEndOffset, setDateEndOffset] = useState<number | null>(null);
   const [region, setRegion] = useState(REGION_ALL);
   const [product, setProduct] = useState(PRODUCT_ALL);
   const period = data.metadata.currentPeriodId;
 
-  const dateRangeOptions = useMemo(() => buildDateRangeOptions(data), [data]);
-  const selectedDateRange = dateRangeOptions.find((item) => item.id === dateRangeId) ?? dateRangeOptions[0];
+  const dateDayOptions = useMemo(() => buildDateDayOptions(data), [data]);
+  const maxDateOffset = dateDayOptions[dateDayOptions.length - 1]?.offset ?? 0;
+  const selectedStartOffset = Math.min(dateStartOffset, maxDateOffset);
+  const selectedEndOffset = Math.min(
+    Math.max(dateEndOffset ?? maxDateOffset, selectedStartOffset),
+    maxDateOffset,
+  );
+  const selectedDateRange = useMemo(
+    () => buildSelectedDateRange(data, selectedStartOffset, selectedEndOffset),
+    [data, selectedStartOffset, selectedEndOffset],
+  );
   const selectedLeaves = useMemo(() => new Set(leavesFor(data, region)), [data, region]);
   const selectedPlatforms = useMemo(() => new Set(platformIds(data, platform)), [data, platform]);
   const availableCoreProductGroups = useMemo(() => coreProductGroups(data), [data]);
@@ -1900,19 +1916,41 @@ function Dashboard({ data }: { data: DataShape }) {
             ))}
           </div>
         </div>
-        <div className="control-group compact">
-          <label htmlFor="date-range-select">日期段</label>
-          <select
-            id="date-range-select"
-            value={selectedDateRange.id}
-            onChange={(event) => setDateRangeId(event.target.value)}
-          >
-            {dateRangeOptions.map((item) => (
-              <option value={item.id} key={item.id}>
-                {item.label}
-              </option>
-            ))}
-          </select>
+        <div className="control-group compact date-range-control">
+          <label>日期段</label>
+          <div className="range-selects">
+            <select
+              aria-label="开始日期"
+              value={selectedStartOffset}
+              onChange={(event) => {
+                const nextStart = Number(event.target.value);
+                setDateStartOffset(nextStart);
+                if (nextStart > selectedEndOffset) setDateEndOffset(nextStart);
+              }}
+            >
+              {dateDayOptions.map((item) => (
+                <option value={item.offset} key={`start-${item.offset}`}>
+                  开始 {item.label}
+                </option>
+              ))}
+            </select>
+            <span>至</span>
+            <select
+              aria-label="结束日期"
+              value={selectedEndOffset}
+              onChange={(event) => {
+                const nextEnd = Number(event.target.value);
+                setDateEndOffset(nextEnd);
+                if (nextEnd < selectedStartOffset) setDateStartOffset(nextEnd);
+              }}
+            >
+              {dateDayOptions.map((item) => (
+                <option value={item.offset} key={`end-${item.offset}`}>
+                  结束 {item.label}
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
         <div className="control-group compact">
           <label htmlFor="region-select">区域</label>

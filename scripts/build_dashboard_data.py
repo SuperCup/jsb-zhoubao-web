@@ -133,6 +133,13 @@ CORE_PRODUCT_GROUPS = [
     }
 ]
 
+CHANNEL_ORDER = ["酒类专营店", "乌苏啤酒/WUSU", "连锁便利店", "连锁超市", "仓店", "其他"]
+CHANNEL_ALIASES = {
+    "中仓店": "仓店",
+    "闪电仓": "仓店",
+}
+WUSU_MERCHANT_NAME = "乌苏啤酒/WUSU"
+
 
 def clean_number(value: Any) -> float:
     if value is None or (isinstance(value, float) and math.isnan(value)):
@@ -162,12 +169,28 @@ def round_float(value: Any, digits: int = 4) -> float | None:
     return round(number, digits)
 
 
+def normalize_channel_fields(df: pd.DataFrame) -> pd.DataFrame:
+    if "清洗_渠道" not in df.columns:
+        return df
+    channel = df["清洗_渠道"].replace(CHANNEL_ALIASES)
+    if "清洗_商户" in df.columns:
+        merchant = df["清洗_商户"]
+        channel = channel.mask(merchant.eq(WUSU_MERCHANT_NAME), WUSU_MERCHANT_NAME)
+    df["清洗_渠道"] = channel.where(channel.isin(CHANNEL_ORDER), "其他")
+    return df
+
+
+def channel_sort_rank(channel: Any) -> int:
+    name = str(channel)
+    return CHANNEL_ORDER.index(name) if name in CHANNEL_ORDER else len(CHANNEL_ORDER)
+
+
 def read_csv(path: Path) -> pd.DataFrame:
     df = pd.read_csv(path, encoding="utf-8-sig", low_memory=False)
     for col in ["清洗_大区", "清洗_渠道", "清洗_品牌", "清洗_商户", "清洗_商品名"]:
         if col in df.columns:
             df[col] = df[col].fillna("未识别").astype(str).str.strip().replace("", "未识别")
-    return df
+    return normalize_channel_fields(df)
 
 
 def source_file(period_id: str, suffix: str) -> Path:
@@ -387,6 +410,9 @@ def build_breakdown(
         if product_scoped:
             record["product"] = str(row["product"])
         rows.append(enrich_record(record))
+
+    if dimension_key == "channel":
+        rows.sort(key=lambda item: (channel_sort_rank(item.get("channel")), item["region"], item.get("product", "")))
 
     if top_n_per_region:
         limited: list[dict[str, Any]] = []
@@ -729,6 +755,7 @@ def build_data() -> dict[str, Any]:
                 for platform_id, platform in PLATFORMS.items()
             ],
             "regionOrder": REGION_ORDER,
+            "channelOrder": CHANNEL_ORDER,
             "regionParent": REGION_PARENT,
             "regionGroups": {
                 "CBC": ["CBC-CQ", "CBC-SC"],
@@ -813,7 +840,7 @@ def write_logic_doc(data: dict[str, Any]) -> None:
 
 - 区域明细：11 个正式叶子区域 + `未识别` 兜底区域，可点击切换。
 - BU 聚合：CBC、CIB、华中按子区域求和；NX、XJ、YN 为独立区域。
-- 渠道下钻：全量表按 `清洗_渠道` 统计 GMV，账单表按同字段补充活动 GMV 和促销费。
+- 渠道下钻：全量表按清洗后的 `清洗_渠道` 统计 GMV，账单表按同字段补充活动 GMV 和促销费；`中仓店` 与 `闪电仓` 合并为 `仓店`，`清洗_商户` 为 `乌苏啤酒/WUSU` 时渠道同步归为 `乌苏啤酒/WUSU`，其余未列渠道合并为 `其他`。
 - 品牌下钻：按 `清洗_品牌` 聚合。
 - 商户与商品下钻：每个平台、周期、区域保留 GMV Top 18，用于页面明细查看。
 - 核心单品筛选下的区域汇总：按 `清洗_大区 + 清洗_商品名` 聚合后，再按核心单品规则合并 SKU；目标/预算仍按平台、年月、BU区域匹配，多 SKU 合并时按 `平台+周期+区域` 去重，避免重复累加 BU 目标和预算。

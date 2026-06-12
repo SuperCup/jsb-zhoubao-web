@@ -95,6 +95,7 @@ type DataShape = {
       sourcePlatform: string;
     }>;
     regionOrder: string[];
+    channelOrder?: string[];
     regionParent: Record<string, string>;
     regionGroups: Record<string, string[]>;
     productOrder?: string[];
@@ -123,6 +124,14 @@ const PRODUCT_ALL = "all";
 const DATA_URL = "/data/dashboard-data.json";
 const DATA_DIR = "/data";
 const GROUP_ORDER = ["CBC", "CIB", "NX", "XJ", "YN", "华中", "未识别"];
+const CHANNEL_ORDER = [
+  "酒类专营店",
+  "乌苏啤酒/WUSU",
+  "连锁便利店",
+  "连锁超市",
+  "仓店",
+  "其他",
+];
 type CoreProductGroup = {
   id: string;
   label: string;
@@ -894,7 +903,18 @@ function collectBreakdown(
     });
   return Array.from(grouped.entries())
     .map(([name, bucket]) => ({ name, ...aggregateRows(bucket) }))
-    .sort((a, b) => b.gmv - a.gmv);
+    .sort((a, b) => {
+      if (key === "channel") {
+        const aIndex = CHANNEL_ORDER.indexOf(a.name);
+        const bIndex = CHANNEL_ORDER.indexOf(b.name);
+        if (aIndex !== -1 || bIndex !== -1) {
+          const safeAIndex = aIndex === -1 ? CHANNEL_ORDER.length : aIndex;
+          const safeBIndex = bIndex === -1 ? CHANNEL_ORDER.length : bIndex;
+          return safeAIndex - safeBIndex;
+        }
+      }
+      return b.gmv - a.gmv;
+    });
 }
 
 function collectActivities(
@@ -1979,7 +1999,7 @@ function Dashboard({ data }: { data: DataShape }) {
                 </tr>
               </thead>
               <tbody>
-                {channels.slice(0, 12).map((row) => {
+                {channels.slice(0, CHANNEL_ORDER.length).map((row) => {
                   const prev = findNamed(previousChannels, row.name);
                   const last = findNamed(lastYearChannels, row.name);
                   return (

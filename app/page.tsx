@@ -1412,6 +1412,32 @@ function Dashboard({ data }: { data: DataShape }) {
       ),
     [merchantSourceRows, period, selectedPlatforms, selectedLeaves, effectiveProduct, availableCoreProductGroups],
   );
+  const previousMerchants = useMemo(
+    () =>
+      collectBreakdown(
+        merchantSourceRows,
+        "merchant",
+        data.metadata.previousPeriodId,
+        selectedPlatforms,
+        selectedLeaves,
+        effectiveProduct,
+        availableCoreProductGroups,
+      ),
+    [merchantSourceRows, data.metadata.previousPeriodId, selectedPlatforms, selectedLeaves, effectiveProduct, availableCoreProductGroups],
+  );
+  const lastYearMerchants = useMemo(
+    () =>
+      collectBreakdown(
+        merchantSourceRows,
+        "merchant",
+        data.metadata.lastYearPeriodId,
+        selectedPlatforms,
+        selectedLeaves,
+        effectiveProduct,
+        availableCoreProductGroups,
+      ),
+    [merchantSourceRows, data.metadata.lastYearPeriodId, selectedPlatforms, selectedLeaves, effectiveProduct, availableCoreProductGroups],
+  );
   const previousBrands = useMemo(
     () =>
       collectBreakdown(
@@ -1862,6 +1888,57 @@ function Dashboard({ data }: { data: DataShape }) {
                 </tr>
               </tbody>
             </table>
+          </div>
+          <div className="subtable-block">
+            <div className="subtable-title">
+              <h3>TOP10零售商表</h3>
+            </div>
+            {merchants.length ? (
+              <div className="table-scroll">
+                <table className="metric-table">
+                  <thead>
+                    <tr>
+                      <th>零售商</th>
+                      <th>全量GMV</th>
+                      <th>{colLabel("全量GMV", "占比")}</th>
+                      <th>{colLabel("环比", "全量GMV")}</th>
+                      <th>{colLabel("同比", "全量GMV")}</th>
+                      <th>活动GMV</th>
+                      <th>活动GMV占比</th>
+                      <th>促销费用</th>
+                      <th>{colLabel("环比", "促销费比")}</th>
+                      <th>{colLabel("同比", "促销费比")}</th>
+                      <th>促销费比</th>
+                      <th>活动折扣率</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {merchants.slice(0, 10).map((row) => {
+                      const prev = findNamed(previousMerchants, row.name);
+                      const last = findNamed(lastYearMerchants, row.name);
+                      return (
+                        <tr key={row.name}>
+                          <th>{row.name}</th>
+                          <td>{formatMoney(row.gmv)}</td>
+                          <td>{formatPercent(safeRatio(row.gmv, current.gmv))}</td>
+                          <td className={trendTone(prev ? compareAggregate(row, prev) : null)}>{formatDelta(prev ? compareAggregate(row, prev) : null)}</td>
+                          <td className={trendTone(last ? compareAggregate(row, last) : null)}>{formatDelta(last ? compareAggregate(row, last) : null)}</td>
+                          <td>{formatMoney(row.activityGmv)}</td>
+                          <td>{formatPercent(row.activityShare)}</td>
+                          <td>{formatMoney(row.subsidy)}</td>
+                          <td className={trendTone(prev ? promoRatioChange(row, prev) : null, true)}>{formatPointDelta(prev ? promoRatioChange(row, prev) : null)}</td>
+                          <td className={trendTone(last ? promoRatioChange(row, last) : null, true)}>{formatPointDelta(last ? promoRatioChange(row, last) : null)}</td>
+                          <td>{formatPercent(row.promoFeeRatio)}</td>
+                          <td>{formatPercent(row.activityDiscount)}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <div className="empty-state">当前筛选范围内没有可展示的零售商数据。</div>
+            )}
           </div>
         </Panel>
       </section>

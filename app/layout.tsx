@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "嘉士伯淘京周报数据看板",
+  title: "嘉士伯即时零售经营周报",
   description: "嘉士伯淘宝闪购与京东秒送周报数据看板",
   icons: {
     icon: "/favicon.svg",

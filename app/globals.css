@@ -89,6 +89,13 @@ p {
   line-height: 1.12;
 }
 
+.header-subtitle {
+  margin-top: 8px;
+  color: #31443d;
+  font-size: 16px;
+  font-weight: 760;
+}
+
 .header-meta {
   display: flex;
   flex-wrap: wrap;
@@ -125,6 +132,18 @@ select {
   grid-template-columns: minmax(300px, 1fr) minmax(180px, 0.55fr) minmax(210px, 0.55fr) minmax(300px, 0.85fr);
   gap: 12px;
   margin-bottom: 14px;
+}
+
+.view-context {
+  margin: 0 auto 14px;
+  max-width: 1480px;
+  border: 1px solid #c7d8d0;
+  border-radius: 8px;
+  background: #f7faf8;
+  padding: 10px 12px;
+  color: #31443d;
+  font-size: 13px;
+  font-weight: 760;
 }
 
 .control-group {
@@ -253,10 +272,47 @@ select {
   color: #377cf0;
 }
 
+.core-metric-topline {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
 .core-metric-label {
   color: var(--muted);
   font-size: 13px;
   font-weight: 850;
+}
+
+.kpi-status {
+  flex: 0 0 auto;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 4px 8px;
+  color: var(--muted);
+  background: #f2f6f4;
+  font-size: 12px;
+  font-weight: 850;
+  line-height: 1;
+}
+
+.kpi-status.good {
+  border-color: #9ccdb9;
+  background: var(--green-soft);
+  color: #0e6046;
+}
+
+.kpi-status.bad {
+  border-color: #e7b4ae;
+  background: var(--red-soft);
+  color: #92332b;
+}
+
+.kpi-status.warn {
+  border-color: #e2bc79;
+  background: var(--amber-soft);
+  color: #87500d;
 }
 
 .core-metric-value {
@@ -549,6 +605,17 @@ select {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 12px;
+}
+
+.diagnostic-grid.executive-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.diagnostic-detail-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 12px;
+  margin-top: 12px;
 }
 
 .diagnostic-card {
@@ -848,6 +915,26 @@ select {
   font-weight: 800;
 }
 
+.metric-table tbody td.alert-bad {
+  background: var(--red-soft);
+  color: #842f28;
+  font-weight: 850;
+}
+
+.metric-table tbody td.alert-warn {
+  background: var(--amber-soft);
+  color: #7b4a0e;
+  font-weight: 850;
+}
+
+.metric-table tbody tr:hover td.alert-bad {
+  background: #f3cbc6;
+}
+
+.metric-table tbody tr:hover td.alert-warn {
+  background: #f2d9ad;
+}
+
 .clickable-row {
   cursor: pointer;
 }
@@ -879,6 +966,8 @@ select {
   .control-band,
   .overview-grid,
   .diagnostic-grid,
+  .diagnostic-grid.executive-grid,
+  .diagnostic-detail-grid,
   .summary-chart-grid,
   .drill-grid {
     grid-template-columns: 1fr 1fr;
@@ -908,6 +997,8 @@ select {
   .core-metric-grid,
   .overview-grid,
   .diagnostic-grid,
+  .diagnostic-grid.executive-grid,
+  .diagnostic-detail-grid,
   .summary-chart-grid,
   .drill-grid,
   .recon-grid {

@@ -24,41 +24,49 @@ OUTPUT_JSON = Path(
 )
 LOGIC_DOC = Path(os.environ.get("LOGIC_DOC", WORKSPACE / "docs" / "取数逻辑说明.md"))
 
-CURRENT_PERIOD_ID = "0601-0607"
-PREVIOUS_PERIOD_ID = "0501-0507"
-LAST_YEAR_PERIOD_ID = "25年0601-0607"
+CURRENT_PERIOD_ID = "0601-0614"
+PREVIOUS_PERIOD_ID = "0501-0514"
+LAST_YEAR_PERIOD_ID = "25年0601-0614"
 
 
 PERIODS = [
     {
         "id": PREVIOUS_PERIOD_ID,
-        "label": "WTD 5.1-5.7",
-        "shortLabel": "5.1-5.7",
+        "label": "WTD 5.1-5.14",
+        "shortLabel": "5.1-5.14",
         "kind": "previous",
         "start": "2026-05-01",
-        "end": "2026-05-07",
+        "end": "2026-05-14",
         "monthKey": 202605,
         "monthLabel": "2026年5月",
+        "sourceIds": ["0501-0507", "0508-0514"],
     },
     {
         "id": CURRENT_PERIOD_ID,
-        "label": "WTD 6.1-6.7",
-        "shortLabel": "6.1-6.7",
+        "label": "WTD 6.1-6.14",
+        "shortLabel": "6.1-6.14",
         "kind": "current",
         "start": "2026-06-01",
-        "end": "2026-06-07",
+        "end": "2026-06-14",
         "monthKey": 202606,
         "monthLabel": "2026年6月",
+        "sourceIds": ["0601-0607", "0608-0614"],
+        "sourceOverrides": {
+            "jd": {
+                "账单数据明细-京东到家.csv": ["0601-0607", "0608-0612"],
+            },
+        },
     },
     {
         "id": LAST_YEAR_PERIOD_ID,
-        "label": "去年同期 6.1-6.7",
-        "shortLabel": "2025 6.1-6.7",
+        "label": "去年同期 6.1-6.14",
+        "shortLabel": "2025 6.1-6.14",
         "kind": "last_year",
         "start": "2025-06-01",
-        "end": "2025-06-07",
+        "end": "2025-06-14",
         "monthKey": 202506,
         "monthLabel": "2025年6月",
+        "sourceIds": ["25年0601-0607", "25年0608-0614"],
     },
 ]
 
@@ -226,11 +234,24 @@ def read_csv(path: Path) -> pd.DataFrame:
     return normalize_channel_fields(df)
 
 
-def source_file(period_id: str, suffix: str) -> Path:
-    path = SOURCE_DIR / f"{period_id}嘉士伯周报{suffix}"
-    if not path.exists():
-        raise FileNotFoundError(f"Missing source file: {path}")
-    return path
+def source_files(period: dict[str, Any], platform_id: str, suffix: str) -> list[Path]:
+    source_ids = (
+        period.get("sourceOverrides", {})
+        .get(platform_id, {})
+        .get(suffix, period.get("sourceIds", [period["id"]]))
+    )
+    paths = [SOURCE_DIR / f"{source_id}嘉士伯周报{suffix}" for source_id in source_ids]
+    missing = [path for path in paths if not path.exists()]
+    if missing:
+        raise FileNotFoundError(f"Missing source file(s): {', '.join(str(path) for path in missing)}")
+    return paths
+
+
+def read_period_csvs(period: dict[str, Any], platform_id: str, suffix: str) -> pd.DataFrame:
+    frames = [read_csv(path) for path in source_files(period, platform_id, suffix)]
+    if not frames:
+        return pd.DataFrame()
+    return pd.concat(frames, ignore_index=True)
 
 
 def load_targets() -> tuple[dict[tuple[str, int], dict[str, float]], dict[tuple[str, int, str], dict[str, float]]]:
@@ -645,10 +666,8 @@ def build_data() -> dict[str, Any]:
 
     for period in periods:
         for platform_id, platform in PLATFORMS.items():
-            full_path = source_file(period["id"], platform["fullSuffix"])
-            bill_path = source_file(period["id"], platform["billSuffix"])
-            full_df = read_csv(full_path)
-            bill_df = read_csv(bill_path)
+            full_df = read_period_csvs(period, platform_id, platform["fullSuffix"])
+            bill_df = read_period_csvs(period, platform_id, platform["billSuffix"])
 
             full_region = summarize_full(full_df, platform, ["date", "清洗_大区"])
             bill_region = summarize_bill(bill_df, platform, ["date", "清洗_大区"])
@@ -843,8 +862,9 @@ def write_logic_doc(data: dict[str, Any]) -> None:
 ## 数据源
 
 - 源目录：`{SOURCE_DIR}`
-- 周期：`0501-0507`、`0601-0607`、`25年0601-0607`
-- 页面默认展示目标分析周期 `0601-0607`，不提供周期筛选；`0501-0507` 仅用于环比参照，`25年0601-0607` 仅用于同比参照。
+- 周期：`0501-0514`、`0601-0614`、`25年0601-0614`
+- 页面默认展示目标分析周期 `0601-0614`，不提供周期筛选；`0501-0514` 仅用于环比参照，`25年0601-0614` 仅用于同比参照。
+- 源文件合并：`0601-0614` 由 `0601-0607` + `0608-0614` 补充文件合并；`0501-0514` 由 `0501-0507` + `0508-0514` 合并；`25年0601-0614` 由 `25年0601-0607` + `25年0608-0614` 合并。当前京东秒送账单补充文件只到 `0608-0612`，因此 6.13-6.14 的京东活动 GMV、促销费、活动 ROI 待下一次补数后刷新。
 - 平台映射：前端展示 `淘宝闪购` 对应目标/预算表中的 `饿了么`；前端展示 `京东秒送` 对应目标/预算表中的 `京东到家`。
 - 区域字段：所有源表统一使用 `清洗_大区` 做区域匹配，使用脚本内置层级聚合为 `CBC`、`CIB`、`华中`、`NX`、`XJ`、`YN`。清洗后仍为空的记录保留在 `未识别`，不并入正式 BU。
 - 核心单品筛选字段：使用源表 `清洗_商品名`。会议中提到的 `一生装` 按业务口径识别为 `一升装（1L）`，匹配商品名中出现 `1L/１L` 的 SKU。网页默认展示全部商品，选择核心单品后，核心指标、AI诊断、Summary、区域表和下钻表按该核心单品重算。
@@ -873,11 +893,11 @@ def write_logic_doc(data: dict[str, Any]) -> None:
 
 ## 对比逻辑
 
-- 周环比：当前周期 `0601-0607` 对比指定环比基准周期 `0501-0507`。
-- 同比：当前周期 `0601-0607` 对比去年同期 `25年0601-0607`。
+- 周环比：当前周期 `0601-0614` 对比指定环比基准周期 `0501-0514`。
+- 同比：当前周期 `0601-0614` 对比去年同期 `25年0601-0614`。
 - 日期段筛选：源表日期统一清洗为 `date` 字段；选择当前周期内任意日期段时，当前周期、环比基准和去年同期按相同起止 offset 取数。例如选择 6.1-6.3 时，环比取 5.1-5.3，同比取 2025.6.1-6.3。
 - 月度目标达成率：`周期全量 GMV / 当月 BU 目标`。
-- 进度校正达成：`目标达成率 / 当月已过天数比例`。例如 6.1-6.7 使用 `7 / 30`。
+- 进度校正达成：`目标达成率 / 当月已过天数比例`。例如 6.1-6.14 使用 `14 / 30`。
 - 预算使用率：`促销费 / BU 预算`。
 
 ## 下钻数据
@@ -890,8 +910,8 @@ def write_logic_doc(data: dict[str, Any]) -> None:
 - 品牌下钻：按 `清洗_品牌` 聚合。
 - 商户与商品下钻：每个平台、周期、区域保留 GMV Top 18，用于页面明细查看。
 - 核心单品筛选下的区域汇总：按 `清洗_大区 + 清洗_商品名` 聚合后，再按核心单品规则合并 SKU；目标/预算仍按平台、年月、BU区域匹配，多 SKU 合并时按 `平台+周期+区域` 去重，避免重复累加 BU 目标和预算。
-- 核心单品表：选择 `一升装（1L）` 时展示所有命中 SKU 的 GMV、费比、目标达成率、活动GMV占比、预算使用率、环比和同比。
-- 活动名称下钻：淘宝闪购按账单表 `活动名称` 聚合，京东秒送按账单表 `补贴名称` 聚合，输出 `核销金额`、`活动GMV`、`促销费比`、`活动ROI`、`核券量`。
+- TOP核心单品：选择 `一升装（1L）` 时展示命中 SKU 的 GMV、费比、目标达成率、活动GMV占比、预算使用率、环比和同比，超过 Top10 的 SKU 合并到 `其它`。
+- TOP10活动：淘宝闪购按账单表 `活动名称` 聚合，京东秒送按账单表 `补贴名称` 聚合，输出 `核销金额`、`活动GMV`、`活动GMV占比`、`促销费比`、`活动ROI`、`核券量`，超过 Top10 的活动合并到 `其它`。
 
 ## 校验
 

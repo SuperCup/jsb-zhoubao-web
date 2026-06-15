@@ -2484,7 +2484,7 @@ function Dashboard({ data }: { data: DataShape }) {
       </section>
 
       <section className="table-section">
-        <Panel title="区域表" kicker="MTD 与 WTD 字段、顺序按 Excel 对齐；点击区域可下钻">
+        <Panel title="区域表" kicker="点击区域可下钻，再次点击同一区域可返回全国/全区域">
           <div className="table-scroll">
             <table className="metric-table region-weekly-table">
               <thead>
@@ -2690,7 +2690,7 @@ function Dashboard({ data }: { data: DataShape }) {
 
       <section className="table-section">
         <Panel
-          title="核心单品表"
+          title="TOP核心单品"
           kicker={`${selectedProductLabel === "全部商品" ? "年度核心单品SKU" : selectedProductLabel} · ${periodLabel(data, period).replace("WTD ", "")}`}
         >
           {coreSkuRows.length ? (
@@ -2751,7 +2751,7 @@ function Dashboard({ data }: { data: DataShape }) {
       </section>
 
       <section className="detail-grid">
-        <Panel title="活动表" kicker={`WTD（${periodLabel(data, period).replace("WTD ", "")}）`}>
+        <Panel title="TOP10活动" kicker={`WTD（${periodLabel(data, period).replace("WTD ", "")}）`}>
           <div className="table-scroll">
             <table className="metric-table">
               <thead>

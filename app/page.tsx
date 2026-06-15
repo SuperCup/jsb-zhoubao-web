@@ -4,16 +4,16 @@ import { useEffect, useMemo, useState } from "react";
 
 type MetricRow = {
   platformId: string;
-  platformLabel: string;
+  platformLabel?: string;
   sourcePlatform?: string;
   periodId: string;
-  periodLabel: string;
-  periodKind: string;
+  periodLabel?: string;
+  periodKind?: string;
   date?: string;
   monthLabel?: string;
   timeProgress?: number | null;
   region: string;
-  parent: string;
+  parent?: string;
   product?: string;
   gmv: number;
   quantity?: number | null;
@@ -37,13 +37,13 @@ type BreakdownRow = MetricRow & {
 
 type ActivityRow = {
   platformId: string;
-  platformLabel: string;
+  platformLabel?: string;
   periodId: string;
-  periodLabel: string;
-  periodKind: string;
+  periodLabel?: string;
+  periodKind?: string;
   date?: string;
   region: string;
-  parent: string;
+  parent?: string;
   product?: string;
   activityName: string;
   redemptionAmount: number;

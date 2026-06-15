@@ -868,7 +868,7 @@ def write_logic_doc(data: dict[str, Any]) -> None:
 - 平台映射：前端展示 `淘宝闪购` 对应目标/预算表中的 `饿了么`；前端展示 `京东秒送` 对应目标/预算表中的 `京东到家`。
 - 区域字段：所有源表统一使用 `清洗_大区` 做区域匹配，使用脚本内置层级聚合为 `CBC`、`CIB`、`华中`、`NX`、`XJ`、`YN`。清洗后仍为空的记录保留在 `未识别`，不并入正式 BU。
 - 核心单品筛选字段：使用源表 `清洗_商品名`。会议中提到的 `一生装` 按业务口径识别为 `一升装（1L）`，匹配商品名中出现 `1L/１L` 的 SKU。网页默认展示全部商品，选择核心单品后，核心指标、AI诊断、Summary、区域表和下钻表按该核心单品重算。
-- 数据文件：核心数据输出到 `public/data/dashboard-data.json`，核心单品命中的商品明细按平台拆分到 `public/data/product-data-*.json`，网页运行时合并加载，避免把大体量商品明细打入前端代码包或超过单文件限制。
+- 数据文件：核心数据输出到 `public/data/dashboard-data.json`，核心单品命中的商品明细按平台拆分到 `public/data/product-data-*.json`，网页运行时合并加载。最终 JSON 只保留页面筛选、聚合和展示需要的字段，不输出未使用的全量商品 breakdown。
 
 ## 核心指标口径
 
@@ -908,7 +908,7 @@ def write_logic_doc(data: dict[str, Any]) -> None:
 - BU 聚合：CBC、CIB、华中按子区域求和；NX、XJ、YN 为独立区域。
 - 渠道下钻：全量表按清洗后的 `清洗_渠道` 统计 GMV，账单表按同字段补充活动 GMV 和促销费；`中仓店` 与 `闪电仓` 合并为 `仓店`，`清洗_商户` 为 `乌苏啤酒/WUSU` 时渠道同步归为 `乌苏啤酒/WUSU`，其余未列渠道合并为 `其他`。
 - 品牌下钻：按 `清洗_品牌` 聚合。
-- 商户与商品下钻：每个平台、周期、区域保留 GMV Top 18，用于页面明细查看。
+- 商户下钻：每个平台、周期、区域保留 GMV Top 18，用于页面明细查看；商品维度仅保留核心单品相关数据。
 - 核心单品筛选下的区域汇总：按 `清洗_大区 + 清洗_商品名` 聚合后，再按核心单品规则合并 SKU；目标/预算仍按平台、年月、BU区域匹配，多 SKU 合并时按 `平台+周期+区域` 去重，避免重复累加 BU 目标和预算。
 - TOP核心单品：选择 `一升装（1L）` 时展示命中 SKU 的 GMV、费比、目标达成率、活动GMV占比、预算使用率、环比和同比，超过 Top10 的 SKU 合并到 `其它`。
 - TOP10活动：淘宝闪购按账单表 `活动名称` 聚合，京东秒送按账单表 `补贴名称` 聚合，输出 `核销金额`、`活动GMV`、`活动GMV占比`、`促销费比`、`活动ROI`、`核券量`，超过 Top10 的活动合并到 `其它`。
@@ -926,6 +926,69 @@ def write_logic_doc(data: dict[str, Any]) -> None:
     LOGIC_DOC.write_text(md, encoding="utf-8")
 
 
+METRIC_EXPORT_KEYS = [
+    "platformId",
+    "periodId",
+    "date",
+    "timeProgress",
+    "region",
+    "product",
+    "gmv",
+    "quantity",
+    "orders",
+    "users",
+    "activityGmv",
+    "subsidy",
+    "budget",
+    "buTarget",
+    "targetGmv",
+    "actualTmFeeRatio",
+    "targetPromoFeeRatio",
+]
+
+BREAKDOWN_EXPORT_KEYS = [
+    "platformId",
+    "periodId",
+    "date",
+    "region",
+    "channel",
+    "brand",
+    "merchant",
+    "product",
+    "gmv",
+    "quantity",
+    "orders",
+    "users",
+    "activityGmv",
+    "subsidy",
+]
+
+ACTIVITY_EXPORT_KEYS = [
+    "platformId",
+    "periodId",
+    "date",
+    "region",
+    "product",
+    "activityName",
+    "redemptionAmount",
+    "activityGmv",
+    "couponCount",
+]
+
+
+def compact_row(row: dict[str, Any], keys: list[str]) -> dict[str, Any]:
+    compacted: dict[str, Any] = {}
+    for key in keys:
+        value = row.get(key)
+        if value is not None:
+            compacted[key] = value
+    return compacted
+
+
+def compact_rows(rows: list[dict[str, Any]], keys: list[str]) -> list[dict[str, Any]]:
+    return [compact_row(row, keys) for row in rows]
+
+
 def main() -> None:
     data = build_data()
     OUTPUT_JSON.parent.mkdir(parents=True, exist_ok=True)
@@ -934,21 +997,43 @@ def main() -> None:
         product_file = OUTPUT_JSON.parent / f"product-data-{platform_id}.json"
         product_files.append(product_file.name)
         product_payload = {
-            "productRecords": [
-                row for row in data["productRecords"] if row["platformId"] == platform_id
-            ],
+            "productRecords": compact_rows(
+                [row for row in data["productRecords"] if row["platformId"] == platform_id],
+                METRIC_EXPORT_KEYS,
+            ),
             "breakdowns": {
-                key: [
-                    row
-                    for row in data["breakdowns"][key]
-                    if row["platformId"] == platform_id
-                ]
-                for key in [
-                    "channelsByProduct",
-                    "brandsByProduct",
-                    "merchantsByProduct",
-                    "activitiesByProduct",
-                ]
+                "channelsByProduct": compact_rows(
+                    [
+                        row
+                        for row in data["breakdowns"]["channelsByProduct"]
+                        if row["platformId"] == platform_id
+                    ],
+                    BREAKDOWN_EXPORT_KEYS,
+                ),
+                "brandsByProduct": compact_rows(
+                    [
+                        row
+                        for row in data["breakdowns"]["brandsByProduct"]
+                        if row["platformId"] == platform_id
+                    ],
+                    BREAKDOWN_EXPORT_KEYS,
+                ),
+                "merchantsByProduct": compact_rows(
+                    [
+                        row
+                        for row in data["breakdowns"]["merchantsByProduct"]
+                        if row["platformId"] == platform_id
+                    ],
+                    BREAKDOWN_EXPORT_KEYS,
+                ),
+                "activitiesByProduct": compact_rows(
+                    [
+                        row
+                        for row in data["breakdowns"]["activitiesByProduct"]
+                        if row["platformId"] == platform_id
+                    ],
+                    ACTIVITY_EXPORT_KEYS,
+                ),
             },
         }
         product_file.write_text(
@@ -956,23 +1041,20 @@ def main() -> None:
             encoding="utf-8",
         )
 
+    core_breakdowns = {
+        "channels": compact_rows(data["breakdowns"]["channels"], BREAKDOWN_EXPORT_KEYS),
+        "brands": compact_rows(data["breakdowns"]["brands"], BREAKDOWN_EXPORT_KEYS),
+        "merchants": compact_rows(data["breakdowns"]["merchants"], BREAKDOWN_EXPORT_KEYS),
+        "activities": compact_rows(data["breakdowns"]["activities"], ACTIVITY_EXPORT_KEYS),
+    }
     core_data = {
         **data,
         "metadata": {
             **data["metadata"],
             "productDataFiles": product_files,
         },
-        "breakdowns": {
-            key: value
-            for key, value in data["breakdowns"].items()
-            if key
-            not in {
-                "channelsByProduct",
-                "brandsByProduct",
-                "merchantsByProduct",
-                "activitiesByProduct",
-            }
-        },
+        "records": compact_rows(data["records"], METRIC_EXPORT_KEYS),
+        "breakdowns": core_breakdowns,
     }
     core_data.pop("productRecords", None)
     OUTPUT_JSON.write_text(json.dumps(core_data, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")

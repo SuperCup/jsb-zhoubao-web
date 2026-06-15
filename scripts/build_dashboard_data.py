@@ -32,7 +32,7 @@ LAST_YEAR_PERIOD_ID = "25年0601-0614"
 PERIODS = [
     {
         "id": PREVIOUS_PERIOD_ID,
-        "label": "WTD 5.1-5.14",
+        "label": "MTD 5.1-5.14",
         "shortLabel": "5.1-5.14",
         "kind": "previous",
         "start": "2026-05-01",
@@ -43,7 +43,7 @@ PERIODS = [
     },
     {
         "id": CURRENT_PERIOD_ID,
-        "label": "WTD 6.1-6.14",
+        "label": "MTD 6.1-6.14",
         "shortLabel": "6.1-6.14",
         "kind": "current",
         "start": "2026-06-01",

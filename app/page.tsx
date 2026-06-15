@@ -2172,37 +2172,43 @@ function Dashboard({ data }: { data: DataShape }) {
         <div className="control-group compact date-range-control">
           <label>日期段</label>
           <div className="range-selects">
-            <select
-              aria-label="开始日期"
-              value={selectedStartOffset}
-              onChange={(event) => {
-                const nextStart = Number(event.target.value);
-                setDateStartOffset(nextStart);
-                if (nextStart > selectedEndOffset) setDateEndOffset(nextStart);
-              }}
-            >
-              {dateDayOptions.map((item) => (
-                <option value={item.offset} key={`start-${item.offset}`}>
-                  开始 {item.label}
-                </option>
-              ))}
-            </select>
-            <span>至</span>
-            <select
-              aria-label="结束日期"
-              value={selectedEndOffset}
-              onChange={(event) => {
-                const nextEnd = Number(event.target.value);
-                setDateEndOffset(nextEnd);
-                if (nextEnd < selectedStartOffset) setDateStartOffset(nextEnd);
-              }}
-            >
-              {dateDayOptions.map((item) => (
-                <option value={item.offset} key={`end-${item.offset}`}>
-                  结束 {item.label}
-                </option>
-              ))}
-            </select>
+            <div className="range-select-field">
+              <span>开始</span>
+              <select
+                aria-label="开始日期"
+                value={selectedStartOffset}
+                onChange={(event) => {
+                  const nextStart = Number(event.target.value);
+                  setDateStartOffset(nextStart);
+                  if (nextStart > selectedEndOffset) setDateEndOffset(nextStart);
+                }}
+              >
+                {dateDayOptions.map((item) => (
+                  <option value={item.offset} key={`start-${item.offset}`}>
+                    {item.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <span className="range-separator">至</span>
+            <div className="range-select-field">
+              <span>结束</span>
+              <select
+                aria-label="结束日期"
+                value={selectedEndOffset}
+                onChange={(event) => {
+                  const nextEnd = Number(event.target.value);
+                  setDateEndOffset(nextEnd);
+                  if (nextEnd < selectedStartOffset) setDateStartOffset(nextEnd);
+                }}
+              >
+                {dateDayOptions.map((item) => (
+                  <option value={item.offset} key={`end-${item.offset}`}>
+                    {item.label}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
         </div>
         <div className="control-group compact">
@@ -2300,7 +2306,7 @@ function Dashboard({ data }: { data: DataShape }) {
       </section>
 
       <section className="summary-section">
-        <Panel title="Summary" kicker="图形表达按当前筛选区分双平台与单平台">
+        <Panel title="Summary">
           <div className="summary-scope-stack">
             {summaryPanels.map((scope) => {
               const regionGmvTitle = includeTargetBudget
@@ -2443,7 +2449,7 @@ function Dashboard({ data }: { data: DataShape }) {
       </section>
 
       <section className="table-section">
-        <Panel title="月度总览" kicker="字段与 Excel 顶部总览保持一致">
+        <Panel title="月度总览">
           <div className="table-scroll">
             <table className="metric-table compact">
               <thead>
@@ -2490,8 +2496,8 @@ function Dashboard({ data }: { data: DataShape }) {
               <thead>
                 <tr>
                   <th rowSpan={2}>区域</th>
-                  <th colSpan={includeTargetBudget ? 5 : 2}>MTD（{periodLabel(data, period).replace("WTD ", "")}）</th>
-                  <th colSpan={7}>WTD（{periodLabel(data, period).replace("WTD ", "")}）</th>
+                  <th colSpan={includeTargetBudget ? 5 : 2}>MTD（{periodLabel(data, period).replace("MTD ", "")}）</th>
+                  <th colSpan={7}>MTD（{periodLabel(data, period).replace("MTD ", "")}）</th>
                 </tr>
                 <tr>
                   <th>全量GMV</th>
@@ -2550,7 +2556,7 @@ function Dashboard({ data }: { data: DataShape }) {
       </section>
 
       <section className="detail-grid">
-        <Panel title="渠道表" kicker={`WTD（${periodLabel(data, period).replace("WTD ", "")}）`}>
+        <Panel title="渠道表" kicker={`MTD（${periodLabel(data, period).replace("MTD ", "")}）`}>
           <div className="table-scroll">
             <table className="metric-table">
               <thead>
@@ -2597,7 +2603,7 @@ function Dashboard({ data }: { data: DataShape }) {
       </section>
 
       <section className="detail-grid">
-        <Panel title="TOP10零售商表" kicker={`WTD（${periodLabel(data, period).replace("WTD ", "")}）`}>
+        <Panel title="TOP10零售商表" kicker={`MTD（${periodLabel(data, period).replace("MTD ", "")}）`}>
           {merchants.length ? (
             <div className="table-scroll">
               <table className="metric-table">
@@ -2648,7 +2654,7 @@ function Dashboard({ data }: { data: DataShape }) {
       </section>
 
       <section className="detail-grid">
-        <Panel title="品牌表" kicker={`GMV表现（${periodLabel(data, period).replace("WTD ", "")}）`}>
+        <Panel title="品牌表" kicker={`GMV表现（${periodLabel(data, period).replace("MTD ", "")}）`}>
           <div className="table-scroll">
             <table className="metric-table">
               <thead>
@@ -2691,7 +2697,7 @@ function Dashboard({ data }: { data: DataShape }) {
       <section className="table-section">
         <Panel
           title="TOP核心单品"
-          kicker={`${selectedProductLabel === "全部商品" ? "年度核心单品SKU" : selectedProductLabel} · ${periodLabel(data, period).replace("WTD ", "")}`}
+          kicker={`${selectedProductLabel === "全部商品" ? "年度核心单品SKU" : selectedProductLabel} · ${periodLabel(data, period).replace("MTD ", "")}`}
         >
           {coreSkuRows.length ? (
             <div className="table-scroll">
@@ -2751,7 +2757,7 @@ function Dashboard({ data }: { data: DataShape }) {
       </section>
 
       <section className="detail-grid">
-        <Panel title="TOP10活动" kicker={`WTD（${periodLabel(data, period).replace("WTD ", "")}）`}>
+        <Panel title="TOP10活动" kicker={`MTD（${periodLabel(data, period).replace("MTD ", "")}）`}>
           <div className="table-scroll">
             <table className="metric-table">
               <thead>

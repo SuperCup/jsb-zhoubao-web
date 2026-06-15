@@ -193,14 +193,27 @@ select {
 .range-selects {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
-  align-items: center;
+  align-items: end;
   gap: 8px;
 }
 
-.range-selects span {
+.range-select-field {
+  display: grid;
+  gap: 4px;
+}
+
+.range-select-field span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 760;
+  line-height: 1;
+}
+
+.range-separator {
   color: var(--muted);
   font-size: 12px;
   font-weight: 800;
+  padding-bottom: 11px;
 }
 
 .core-matrix {
@@ -1115,7 +1128,7 @@ select {
     grid-template-columns: 1fr;
   }
 
-  .range-selects span {
+  .range-separator {
     display: none;
   }
 

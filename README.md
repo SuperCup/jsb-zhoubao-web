@@ -55,4 +55,6 @@ http://127.0.0.1:3000/
 - 测试地址：`https://supercup.github.io/jsb-zhoubao-web/`
 - 正式地址：`https://agent.ismartgo.com/carlsberg/weekly`
 
-推送 `main` 后，GitHub Actions 会自动构建并发布到 `gh-pages` 分支，对应测试地址。正式地址不会自动发布，必须等群成员验证测试地址并明确允许后，才可通过 `agent.ismartgo.com` 管理后台或 API 发布。
+推送 `main` 后，GitHub Actions 会自动构建并发布到 `gh-pages` 分支，对应测试地址。正式地址不会自动发布，必须等群成员验证测试地址并明确允许后，才可通过 `agent.ismartgo.com` 上传接口发布。
+
+Netlify 已弃用，不再更新。正式发布使用 `agent.ismartgo.com` 上传接口，发布步骤记录在 [docs/发布流程.md](docs/发布流程.md)。

@@ -2,6 +2,8 @@
 
 import { useEffect, useMemo, useState } from "react";
 
+declare const __DATA_CACHE_VERSION__: string | undefined;
+
 type MetricRow = {
   platformId: string;
   platformLabel?: string;
@@ -137,6 +139,8 @@ const REGION_ALL = "all";
 const PRODUCT_ALL = "all";
 const DATE_RANGE_ALL = "all";
 const DATA_FILE = "dashboard-data.json";
+const DATA_CACHE_VERSION =
+  typeof __DATA_CACHE_VERSION__ === "string" ? __DATA_CACHE_VERSION__ : "local";
 const TOP_ROW_LIMIT = 10;
 const OTHER_LABEL = "其它";
 const GROUP_ORDER = ["CBC", "CIB", "NX", "XJ", "YN", "华中", "未识别"];
@@ -228,17 +232,23 @@ async function fetchJson<T>(url: string): Promise<T> {
 
 function publicDataUrl(file: string): string {
   const cleanFile = file.replace(/^\/+/, "");
+  const withVersion = (url: string) => {
+    const dataUrl = new URL(url, window.location.href);
+    dataUrl.searchParams.set("v", DATA_CACHE_VERSION);
+    return `${dataUrl.pathname}${dataUrl.search}${dataUrl.hash}`;
+  };
+
   if (typeof window === "undefined") return `/data/${cleanFile}`;
 
   const script = document.querySelector<HTMLScriptElement>('script[src*="/assets/"]');
   const assetPath = script ? new URL(script.src, window.location.href).pathname : "";
   const marker = "/assets/";
   const assetIndex = assetPath.indexOf(marker);
-  if (assetIndex >= 0) return `${assetPath.slice(0, assetIndex + 1)}data/${cleanFile}`;
+  if (assetIndex >= 0) return withVersion(`${assetPath.slice(0, assetIndex + 1)}data/${cleanFile}`);
 
   const { pathname } = window.location;
   const currentBase = pathname.endsWith("/") ? pathname : `${pathname}/`;
-  return `${currentBase}data/${cleanFile}`;
+  return withVersion(`${currentBase}data/${cleanFile}`);
 }
 
 async function loadDashboardData(): Promise<DataShape> {

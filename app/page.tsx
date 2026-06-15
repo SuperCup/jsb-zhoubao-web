@@ -125,8 +125,7 @@ const PLATFORM_ALL = "all";
 const REGION_ALL = "all";
 const PRODUCT_ALL = "all";
 const DATE_RANGE_ALL = "all";
-const DATA_URL = "data/dashboard-data.json";
-const DATA_DIR = "data";
+const DATA_FILE = "dashboard-data.json";
 const GROUP_ORDER = ["CBC", "CIB", "NX", "XJ", "YN", "华中", "未识别"];
 const CHANNEL_ORDER = [
   "酒类专营店",
@@ -209,13 +208,28 @@ async function fetchJson<T>(url: string): Promise<T> {
   return response.json() as Promise<T>;
 }
 
+function publicDataUrl(file: string): string {
+  const cleanFile = file.replace(/^\/+/, "");
+  if (typeof window === "undefined") return `/data/${cleanFile}`;
+
+  const script = document.querySelector<HTMLScriptElement>('script[src*="/assets/"]');
+  const assetPath = script ? new URL(script.src, window.location.href).pathname : "";
+  const marker = "/assets/";
+  const assetIndex = assetPath.indexOf(marker);
+  if (assetIndex >= 0) return `${assetPath.slice(0, assetIndex + 1)}data/${cleanFile}`;
+
+  const { pathname } = window.location;
+  const currentBase = pathname.endsWith("/") ? pathname : `${pathname}/`;
+  return `${currentBase}data/${cleanFile}`;
+}
+
 async function loadDashboardData(): Promise<DataShape> {
-  const coreData = await fetchJson<DataShape>(DATA_URL);
+  const coreData = await fetchJson<DataShape>(publicDataUrl(DATA_FILE));
   const productFiles = coreData.metadata.productDataFiles ?? [];
   if (!productFiles.length) return coreData;
 
   const productPayloads = await Promise.all(
-    productFiles.map((file) => fetchJson<ProductDataPayload>(`${DATA_DIR}/${file}`)),
+    productFiles.map((file) => fetchJson<ProductDataPayload>(publicDataUrl(file))),
   );
 
   return productPayloads.reduce<DataShape>(

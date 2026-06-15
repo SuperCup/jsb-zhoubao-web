@@ -945,18 +945,36 @@ select {
 
 .table-notes {
   display: grid;
-  gap: 6px;
-  margin: 10px 0 0;
-  color: var(--muted);
-  font-size: 12px;
-  line-height: 1.55;
+  gap: 8px;
+  margin: 12px 0 0;
+  padding: 10px 12px;
+  border-left: 3px solid var(--green);
+  border-radius: 6px;
+  background: #f7faf8;
+  color: #334840;
+  font-size: 13px;
+  line-height: 1.6;
 }
 
-.table-notes p {
+.table-notes h3 {
+  margin: 0;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 850;
+  line-height: 1.25;
+}
+
+.table-notes-list {
+  display: grid;
+  gap: 5px;
   margin: 0;
 }
 
-.table-notes.ordered {
+.table-notes-list p {
+  margin: 0;
+}
+
+.table-notes-list.ordered {
   padding-left: 18px;
 }
 

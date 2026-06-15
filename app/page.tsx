@@ -1307,22 +1307,24 @@ function tableNotes(items: Array<string | null | undefined>): string[] {
   return items.filter((item): item is string => Boolean(item)).slice(0, 2);
 }
 
-function TableNotes({ items }: { items: string[] }) {
+function TableNotes({ title, items }: { title: string; items: string[] }) {
   if (!items.length) return null;
-  if (items.length > 1) {
-    return (
-      <ol className="table-notes ordered">
-        {items.map((item) => (
-          <li key={item}>{item}</li>
-        ))}
-      </ol>
-    );
-  }
   return (
     <div className="table-notes">
-      {items.map((item) => (
-        <p key={item}>{item}</p>
-      ))}
+      <h3>{title}</h3>
+      {items.length > 1 ? (
+        <ol className="table-notes-list ordered">
+          {items.map((item) => (
+            <li key={item}>{item}</li>
+          ))}
+        </ol>
+      ) : (
+        <div className="table-notes-list">
+          {items.map((item) => (
+            <p key={item}>{item}</p>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -2619,7 +2621,7 @@ function Dashboard({ data }: { data: DataShape }) {
               </tbody>
             </table>
           </div>
-          <TableNotes items={regionTableNotes} />
+          <TableNotes title="BY区域小结" items={regionTableNotes} />
         </Panel>
       </section>
 
@@ -2667,7 +2669,7 @@ function Dashboard({ data }: { data: DataShape }) {
               </tbody>
             </table>
           </div>
-          <TableNotes items={channelTableNotes} />
+          <TableNotes title="BY渠道小结" items={channelTableNotes} />
         </Panel>
       </section>
 
@@ -2760,7 +2762,7 @@ function Dashboard({ data }: { data: DataShape }) {
               </tbody>
             </table>
           </div>
-          <TableNotes items={brandTableNotes} />
+          <TableNotes title="BY品牌小结" items={brandTableNotes} />
         </Panel>
       </section>
 
@@ -2866,7 +2868,7 @@ function Dashboard({ data }: { data: DataShape }) {
               </tbody>
             </table>
           </div>
-          <TableNotes items={activityTableNotes} />
+          <TableNotes title="BY活动小结" items={activityTableNotes} />
         </Panel>
       </section>
 

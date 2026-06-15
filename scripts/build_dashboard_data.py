@@ -147,6 +147,7 @@ CHANNEL_ALIASES = {
     "闪电仓": "仓店",
 }
 WUSU_MERCHANT_NAME = "乌苏啤酒/WUSU"
+SHANLIDA_CHANNEL_NAME = "闪力达"
 DATE_COLUMN_CANDIDATES = ["日期", "账单时间", "业务发生时间", "订单时间", "订单完成时间"]
 
 
@@ -181,6 +182,10 @@ def round_float(value: Any, digits: int = 4) -> float | None:
 def normalize_channel_fields(df: pd.DataFrame) -> pd.DataFrame:
     if "清洗_渠道" not in df.columns:
         return df
+    if {"渠道名称", "清洗_商户"}.issubset(df.columns):
+        shanlida = df["渠道名称"].astype(str).str.strip().eq(SHANLIDA_CHANNEL_NAME)
+        df.loc[shanlida, "清洗_商户"] = SHANLIDA_CHANNEL_NAME
+        df.loc[shanlida, "清洗_渠道"] = "闪电仓"
     channel = df["清洗_渠道"].replace(CHANNEL_ALIASES)
     if "清洗_商户" in df.columns:
         merchant = df["清洗_商户"]
@@ -906,7 +911,7 @@ def write_logic_doc(data: dict[str, Any]) -> None:
 
 - 区域明细：11 个正式叶子区域 + `未识别` 兜底区域，可点击切换。
 - BU 聚合：CBC、CIB、华中按子区域求和；NX、XJ、YN 为独立区域。
-- 渠道下钻：全量表按清洗后的 `清洗_渠道` 统计 GMV，账单表按同字段补充活动 GMV 和促销费；`中仓店` 与 `闪电仓` 合并为 `仓店`，`清洗_商户` 为 `乌苏啤酒/WUSU` 时渠道同步归为 `乌苏啤酒/WUSU`，其余未列渠道合并为 `其他`。
+- 渠道下钻：全量表按清洗后的 `清洗_渠道` 统计 GMV，账单表按同字段补充活动 GMV 和促销费；淘宝闪购全量表 `渠道名称=闪力达` 时补充 `清洗_商户=闪力达`、`清洗_渠道=闪电仓`；`中仓店` 与 `闪电仓` 合并为 `仓店`，`清洗_商户` 为 `乌苏啤酒/WUSU` 时渠道同步归为 `乌苏啤酒/WUSU`，其余未列渠道合并为 `其他`。
 - 品牌下钻：按 `清洗_品牌` 聚合。
 - 商户下钻：每个平台、周期、区域保留 GMV Top 18，用于页面明细查看；商品维度仅保留核心单品相关数据。
 - 核心单品筛选下的区域汇总：按 `清洗_大区 + 清洗_商品名` 聚合后，再按核心单品规则合并 SKU；目标/预算仍按平台、年月、BU区域匹配，多 SKU 合并时按 `平台+周期+区域` 去重，避免重复累加 BU 目标和预算。

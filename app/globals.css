@@ -946,7 +946,7 @@ select {
 .table-notes {
   display: grid;
   gap: 6px;
-  margin-top: 10px;
+  margin: 10px 0 0;
   color: var(--muted);
   font-size: 12px;
   line-height: 1.55;
@@ -954,6 +954,15 @@ select {
 
 .table-notes p {
   margin: 0;
+}
+
+.table-notes.ordered {
+  padding-left: 18px;
+}
+
+.table-notes li::marker {
+  color: var(--green);
+  font-weight: 800;
 }
 
 .metric-table {

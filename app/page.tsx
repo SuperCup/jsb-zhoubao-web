@@ -619,11 +619,6 @@ function activityShareAlert(value: number | null | undefined): string | null {
 
 function customerizeNarrative(text: string): string {
   return [
-    ["承压", "下降或低于预期"],
-    ["承接", "活动结束后还能留下的自然销量"],
-    ["修复目标", "追回目标差距"],
-    ["修复", "追回"],
-    ["降权", "减少资源投入"],
     ["低效", "花钱效果偏弱"],
     ["活动机制", "活动规则"],
     ["机制", "规则"],
@@ -1129,7 +1124,7 @@ function Panel({
   kicker,
   children,
 }: {
-  title: string;
+  title?: string;
   kicker?: string;
   children: React.ReactNode;
 }) {
@@ -1138,7 +1133,7 @@ function Panel({
       <div className="panel-heading">
         <div>
           {kicker ? <p>{kicker}</p> : null}
-          <h2>{title}</h2>
+          {title ? <h2>{title}</h2> : null}
         </div>
       </div>
       {children}
@@ -1314,6 +1309,15 @@ function tableNotes(items: Array<string | null | undefined>): string[] {
 
 function TableNotes({ items }: { items: string[] }) {
   if (!items.length) return null;
+  if (items.length > 1) {
+    return (
+      <ol className="table-notes ordered">
+        {items.map((item) => (
+          <li key={item}>{item}</li>
+        ))}
+      </ol>
+    );
+  }
   return (
     <div className="table-notes">
       {items.map((item) => (
@@ -1462,20 +1466,20 @@ function buildNarrative({
     ? [
         `${reportScope}目标分析周期全量GMV ${formatMoney(current.gmv)}，环比${formatDelta(wow)}，同比${formatDelta(yoy)}。`,
         `GMV目标达成率 ${formatPercent(current.targetAchievement)}，时间进度 ${formatPercent(current.timeProgress)}，${targetGapValue >= 0 ? "领先" : "落后"}时间进度 ${formatPointDistance(targetGapValue)}${targetGmvGap !== null && targetGmvGap > 0 ? `，折算需补 ${formatMoney(targetGmvGap)} GMV` : ""}。`,
-        `实际促销费比 ${formatPercent(current.promoFeeRatio)}，${feeRisk !== null ? `${feeRisk >= 0 ? "高于" : "低于"}目标 ${formatPointDistance(feeRisk)}` : "目标费比缺失"}；活动GMV占比 ${formatPercent(current.activityShare)}，${activityRiskLevel === "high" ? "促销依赖偏高" : activityRiskLevel === "watch" ? "需观察自然增长承接" : "活动依赖相对可控"}。`,
+        `实际促销费比 ${formatPercent(current.promoFeeRatio)}，${feeRisk !== null ? `${feeRisk >= 0 ? "高于" : "低于"}目标 ${formatPointDistance(feeRisk)}` : "目标费比缺失"}；活动GMV占比 ${formatPercent(current.activityShare)}，${activityRiskLevel === "high" ? "促销依赖偏高" : activityRiskLevel === "watch" ? "需观察自然销售是否跟上" : "活动依赖相对可控"}。`,
         `促销预算使用率 ${formatPercent(current.promoBudgetUsage)}，${budgetPressureValue >= 0 ? "快于" : "慢于"}时间进度 ${formatPointDistance(budgetPressureValue)}；${fastBudgetRegion ? `${fastBudgetRegion.node}预算使用率 ${formatPercent(fastBudgetRegion.current.promoBudgetUsage)} 是重点观察对象` : "当前范围暂无可下钻预算节点"}。`,
       ]
     : [
         `${reportScope}当前周期全量GMV ${formatMoney(current.gmv)}，环比${formatDelta(wow)}，同比${formatDelta(yoy)}。`,
-        `实际促销费比 ${formatPercent(current.promoFeeRatio)}，活动GMV占比 ${formatPercent(current.activityShare)}，${activityRiskLevel === "high" ? "促销依赖偏高" : activityRiskLevel === "watch" ? "需观察自然增长承接" : "活动依赖相对可控"}。`,
+        `实际促销费比 ${formatPercent(current.promoFeeRatio)}，活动GMV占比 ${formatPercent(current.activityShare)}，${activityRiskLevel === "high" ? "促销依赖偏高" : activityRiskLevel === "watch" ? "需观察自然销售是否跟上" : "活动依赖相对可控"}。`,
         topDriver
-          ? `${topDriver.node}贡献最大环比增量 ${formatMoney(topDriver.inc)}；${weakDriver ? `${weakDriver.node}环比变化 ${formatMoney(weakDriver.inc)}，本周环比承压，建议进一步拆解渠道和活动承接。` : ""}`
+          ? `${topDriver.node}贡献最大环比增量 ${formatMoney(topDriver.inc)}；${weakDriver ? `${weakDriver.node}环比变化 ${formatMoney(weakDriver.inc)}，本周环比下降或低于预期，建议进一步拆解渠道和活动表现。` : ""}`
           : `${reportScope}没有可拆分的区域增量节点，当前诊断以整体GMV ${formatMoney(current.gmv)} 和费比 ${formatPercent(current.promoFeeRatio)} 为主。`,
       ];
 
   const analysis = [
     topDriver
-      ? `${topDriver.node}贡献最大环比增量 ${formatMoney(topDriver.inc)}；${weakDriver ? `${weakDriver.node}环比变化 ${formatMoney(weakDriver.inc)}，本周环比承压，建议进一步拆解渠道和活动承接。` : ""}`
+      ? `${topDriver.node}贡献最大环比增量 ${formatMoney(topDriver.inc)}；${weakDriver ? `${weakDriver.node}环比变化 ${formatMoney(weakDriver.inc)}，本周环比下降或低于预期，建议进一步拆解渠道和活动表现。` : ""}`
       : `${reportScope}没有可拆分的区域增量节点，当前诊断以整体GMV ${formatMoney(current.gmv)} 和费比 ${formatPercent(current.promoFeeRatio)} 为主。`,
     topChannel && topBrand
       ? `渠道侧${topChannel.name}贡献最高，GMV ${formatMoney(topChannel.gmv)}、占比 ${formatPercent(safeRatio(topChannel.gmv, current.gmv))}；品牌侧${topBrand.name}贡献最高，Top4品牌GMV占比 ${formatPercent(topBrandsShare)}。`
@@ -1484,7 +1488,7 @@ function buildNarrative({
       ? `${highFeeChannel.name}促销费比 ${formatPercent(highFeeChannel.promoFeeRatio)}，${highFeeRegion ? `${highFeeRegion.node}区域费比 ${formatPercent(highFeeRegion.current.promoFeeRatio)}；` : ""}建议确认是否受全国活动影响，或由单渠道/单品机制偏重导致。`
       : `渠道费比未出现大额异常，当前整体促销费比 ${formatPercent(current.promoFeeRatio)}，主要风险来自活动GMV占比 ${formatPercent(current.activityShare)}。`,
     highActivityChannel
-      ? `${highActivityChannel.name}活动GMV占比 ${formatPercent(highActivityChannel.activityShare)}，高于当前范围整体 ${formatPercent(current.activityShare)}；若继续升高，说明基础GMV承接不足。`
+      ? `${highActivityChannel.name}活动GMV占比 ${formatPercent(highActivityChannel.activityShare)}，高于当前范围整体 ${formatPercent(current.activityShare)}；若继续升高，说明基础GMV不足。`
       : `当前没有超过GMV 3%门槛的高活动依赖渠道，整体活动GMV占比为 ${formatPercent(current.activityShare)}。`,
     lowEfficiencyActivity
       ? `活动机制中 ${lowEfficiencyActivity.activityName} 核销金额 ${formatMoney(lowEfficiencyActivity.redemptionAmount)}、促销费比 ${formatPercent(lowEfficiencyActivity.promoFeeRatio)}、ROI ${formatRoi(lowEfficiencyActivity.activityRoi)}，是优先复盘的低效机制候选。`
@@ -1544,13 +1548,13 @@ function buildNarrative({
           ? `区域控费：${highFeeRegion.node}当前促销费比 ${formatPercent(highFeeRegion.current.promoFeeRatio)}，下周目标控制到 ${formatPercent(nextFeeTarget)} 以内；动作顺序为复盘低ROI活动、优化高费SKU、提高券门槛，执行后看GMV是否仍高于 ${formatMoney(highFeeRegion.current.gmv * 0.95)}。`
           : `区域控费：当前没有明显高费比区域，统一设置费比观察线 ${formatPercent(nextFeeTarget)}，超过观察线先复盘低ROI机制。`,
         weakDriver
-          ? `区域追量：${weakDriver.node}环比变化 ${formatMoney(weakDriver.inc)}，下周目标至少修复 ${formatMoney(Math.abs(Math.min(weakDriver.inc, 0)) * 0.5 || current.gmv * 0.03)}；参考${topDriver?.node ?? "高增区域"}的高GMV渠道动作，先补货和曝光，再优化资源。`
+          ? `区域追量：${weakDriver.node}环比变化 ${formatMoney(weakDriver.inc)}，下周目标至少补回 ${formatMoney(Math.abs(Math.min(weakDriver.inc, 0)) * 0.5 || current.gmv * 0.03)}；参考${topDriver?.node ?? "高增区域"}的高GMV渠道动作，先补货和曝光，再优化资源。`
           : `区域追量：当前区域没有可拆分弱项，目标达成率下周提升到 ${formatPercent(nextTargetAchievement)}；动作优先级为高GMV渠道加品、核心SKU补供给、预算向高ROI活动集中。`,
         fastBudgetRegion
           ? `预算节奏：${fastBudgetRegion.node}预算使用率 ${formatPercent(fastBudgetRegion.current.promoBudgetUsage)}，目标控制在时间进度 +5pp 内；若受全国活动影响，则单独评估${fastBudgetRegion.node}高费SKU券包节奏。`
           : `预算节奏：当前预算使用率 ${formatPercent(current.promoBudgetUsage)}，下周目标不高于时间进度 +5pp；预算只投GMV占比前3渠道和ROI达标机制。`,
         topSku
-          ? `产品动作：${topSku.name}是${productLabel}第一SKU，保持主推；${highFeeSku ? `${highFeeSku.name}费比 ${formatPercent(highFeeSku.promoFeeRatio)}，若GMV占比仅 ${formatPercent(safeRatio(highFeeSku.gmv, current.gmv))} 且费比高于整体 ${formatPercent(current.promoFeeRatio)}，下周从券包中降权或优化。` : `下周继续补齐${productLabel} SKU 标签，保证核心单品表能追踪全部SKU。`}`
+          ? `产品动作：${topSku.name}是${productLabel}第一SKU，保持主推；${highFeeSku ? `${highFeeSku.name}费比 ${formatPercent(highFeeSku.promoFeeRatio)}，若GMV占比仅 ${formatPercent(safeRatio(highFeeSku.gmv, current.gmv))} 且费比高于整体 ${formatPercent(current.promoFeeRatio)}，下周减少券包资源投入或优化。` : `下周继续补齐${productLabel} SKU 标签，保证核心单品表能追踪全部SKU。`}`
           : `产品动作：当前筛选未命中核心单品SKU，先补充 SKU 命名规则，再进入产品维度 playbook。`,
         `结果目标：下周复盘必须同时看三条线，GMV目标达成率提升到 ${formatPercent(nextTargetAchievement)}、促销费比不高于 ${formatPercent(nextFeeTarget)}、活动GMV占比不高于 ${formatPercent(nextActivityShareTarget)}。`,
       ]
@@ -1559,34 +1563,34 @@ function buildNarrative({
           ? `区域控费：${highFeeRegion.node}当前促销费比 ${formatPercent(highFeeRegion.current.promoFeeRatio)}，下周控制到 ${formatPercent(nextFeeTarget)} 以内；动作顺序为复盘低ROI活动、优化高费SKU、提高券门槛，执行后看GMV是否仍高于 ${formatMoney(highFeeRegion.current.gmv * 0.95)}。`
           : `区域控费：当前没有明显高费比区域，统一设置费比观察线 ${formatPercent(nextFeeTarget)}，超过观察线先复盘低ROI机制。`,
         weakDriver
-          ? `区域追量：${weakDriver.node}环比变化 ${formatMoney(weakDriver.inc)}，优先修复 ${formatMoney(Math.abs(Math.min(weakDriver.inc, 0)) * 0.5 || current.gmv * 0.03)}；参考${topDriver?.node ?? "高增区域"}的高GMV渠道动作，先补货和曝光，再优化资源。`
+          ? `区域追量：${weakDriver.node}环比变化 ${formatMoney(weakDriver.inc)}，优先补回 ${formatMoney(Math.abs(Math.min(weakDriver.inc, 0)) * 0.5 || current.gmv * 0.03)}；参考${topDriver?.node ?? "高增区域"}的高GMV渠道动作，先补货和曝光，再优化资源。`
           : `区域追量：当前区域没有可拆分弱项；动作优先级为高GMV渠道加品、核心SKU补供给、资源向高ROI活动集中。`,
         lowEfficiencyActivity
-          ? `机制节奏：${lowEfficiencyActivity.activityName} 当前 ROI ${formatRoi(lowEfficiencyActivity.activityRoi)}、费比 ${formatPercent(lowEfficiencyActivity.promoFeeRatio)}，先改门槛或停投，再观察GMV承接。`
+          ? `机制节奏：${lowEfficiencyActivity.activityName} 当前 ROI ${formatRoi(lowEfficiencyActivity.activityRoi)}、费比 ${formatPercent(lowEfficiencyActivity.promoFeeRatio)}，先改门槛或停投，再观察GMV是否保住。`
           : `机制节奏：当前没有明显低效活动，继续按活动ROI和费比排序处理。`,
         topSku
-          ? `产品动作：${topSku.name}是${productLabel}第一SKU，保持主推；${highFeeSku ? `${highFeeSku.name}费比 ${formatPercent(highFeeSku.promoFeeRatio)}，若GMV占比仅 ${formatPercent(safeRatio(highFeeSku.gmv, current.gmv))} 且费比高于整体 ${formatPercent(current.promoFeeRatio)}，下周从券包中降权或优化。` : `下周继续补齐${productLabel} SKU 标签，保证核心单品表能追踪全部SKU。`}`
+          ? `产品动作：${topSku.name}是${productLabel}第一SKU，保持主推；${highFeeSku ? `${highFeeSku.name}费比 ${formatPercent(highFeeSku.promoFeeRatio)}，若GMV占比仅 ${formatPercent(safeRatio(highFeeSku.gmv, current.gmv))} 且费比高于整体 ${formatPercent(current.promoFeeRatio)}，下周减少券包资源投入或优化。` : `下周继续补齐${productLabel} SKU 标签，保证核心单品表能追踪全部SKU。`}`
           : `产品动作：当前筛选未命中核心单品SKU，先补充 SKU 命名规则，再进入产品维度 playbook。`,
         `结果跟踪：下周复盘同时看GMV环比、促销费比和活动GMV占比，避免只用补贴拉动短期销量。`,
       ];
 
   const risks = [
     includeTargetBudget && feeRisk !== null && feeRisk > 0
-      ? `促销费比高于目标 ${formatPointDistance(feeRisk)}，建议优先复盘${feeRiskTarget}的活动机制和SKU承接。`
+      ? `促销费比高于目标 ${formatPointDistance(feeRisk)}，建议优先复盘${feeRiskTarget}的活动机制和SKU销售。`
       : null,
     includeTargetBudget && budgetPressure !== null && budgetPressure > 0.1
       ? `${fastBudgetRegion?.node ?? regionLabel}预算使用率快于时间进度 ${formatPointDistance(budgetPressure)}，建议确认是否受全国活动影响，并评估区域预算节奏。`
       : null,
     activityRiskLevel === "high"
-      ? `活动GMV占比 ${formatPercent(current.activityShare)} 偏高，需关注自然GMV承接和活动后回落风险。`
+      ? `活动GMV占比 ${formatPercent(current.activityShare)} 偏高，需关注自然GMV是否跟上和活动后回落风险。`
       : activityRiskLevel === "watch"
         ? `活动GMV占比 ${formatPercent(current.activityShare)} 需观察，建议同步跟踪自然渠道和核心SKU表现。`
         : null,
     highFeeRegion
-      ? `${highFeeRegion.node}促销费比 ${formatPercent(highFeeRegion.current.promoFeeRatio)}，建议进一步拆解渠道和活动承接。`
+      ? `${highFeeRegion.node}促销费比 ${formatPercent(highFeeRegion.current.promoFeeRatio)}，建议进一步拆解渠道和活动表现。`
       : null,
     weakDriver
-      ? `${weakDriver.node}本周环比承压，建议进一步拆解渠道、活动和供给承接。`
+      ? `${weakDriver.node}本周环比下降或低于预期，建议进一步拆解渠道、活动和供给是否到位。`
       : null,
   ].filter((item): item is string => Boolean(item));
 
@@ -2156,7 +2160,7 @@ function Dashboard({ data }: { data: DataShape }) {
       weakestRegion
         ? weakestRegion.diff < 0
           ? `${weakestRegion.node}环比减少 ${formatMoney(Math.abs(weakestRegion.diff))}，优先看渠道和活动是否拖累。`
-          : `${weakestRegion.node}环比增量较弱，继续观察费用和供给承接。`
+          : `${weakestRegion.node}环比增量较弱，继续观察费用和供给是否到位。`
         : null,
     ]);
   }, [current.gmv, regionRows]);
@@ -2171,7 +2175,7 @@ function Dashboard({ data }: { data: DataShape }) {
         ? `${topChannel.name}贡献最高，GMV ${formatMoney(topChannel.gmv)}，占当前范围 ${formatPercent(safeRatio(topChannel.gmv, current.gmv))}。`
         : null,
       highFeeChannel
-        ? `${highFeeChannel.name}费比 ${formatPercent(highFeeChannel.promoFeeRatio)}，建议复盘券门槛和商品承接。`
+        ? `${highFeeChannel.name}费比 ${formatPercent(highFeeChannel.promoFeeRatio)}，建议复盘券门槛和商品销售。`
         : `渠道费比整体平稳，重点看高GMV渠道能否继续放量。`,
     ]);
   }, [channels, current.gmv]);
@@ -2189,7 +2193,7 @@ function Dashboard({ data }: { data: DataShape }) {
         ? `${topBrand.name}贡献最高，前三品牌合计占比 ${formatPercent(topThreeShare)}。`
         : null,
       activityHeavyBrand
-        ? `${activityHeavyBrand.name}活动GMV占比 ${formatPercent(activityHeavyBrand.activityShare)}，需关注自然销售承接。`
+        ? `${activityHeavyBrand.name}活动GMV占比 ${formatPercent(activityHeavyBrand.activityShare)}，需关注自然销售是否跟上。`
         : null,
     ]);
   }, [brands, current.gmv]);
@@ -2338,7 +2342,7 @@ function Dashboard({ data }: { data: DataShape }) {
       </section>
 
       <section className="diagnostic-section">
-        <Panel title="经营诊断" kicker={`${selectedScopeLabel} · ${selectedRegionLabel(region)} · ${selectedDateLabel}`}>
+        <Panel kicker={`${selectedScopeLabel} · ${selectedRegionLabel(region)} · ${selectedDateLabel}`}>
           <div className="diagnostic-grid executive-grid">
             <article className="diagnostic-card">
               <h3>生意小结</h3>
@@ -2549,7 +2553,6 @@ function Dashboard({ data }: { data: DataShape }) {
               </tbody>
             </table>
           </div>
-          <TableNotes items={regionTableNotes} />
         </Panel>
       </section>
 
@@ -2616,7 +2619,7 @@ function Dashboard({ data }: { data: DataShape }) {
               </tbody>
             </table>
           </div>
-          <TableNotes items={channelTableNotes} />
+          <TableNotes items={regionTableNotes} />
         </Panel>
       </section>
 
@@ -2664,7 +2667,7 @@ function Dashboard({ data }: { data: DataShape }) {
               </tbody>
             </table>
           </div>
-          <TableNotes items={brandTableNotes} />
+          <TableNotes items={channelTableNotes} />
         </Panel>
       </section>
 
@@ -2757,7 +2760,7 @@ function Dashboard({ data }: { data: DataShape }) {
               </tbody>
             </table>
           </div>
-          <TableNotes items={activityTableNotes} />
+          <TableNotes items={brandTableNotes} />
         </Panel>
       </section>
 
@@ -2863,6 +2866,7 @@ function Dashboard({ data }: { data: DataShape }) {
               </tbody>
             </table>
           </div>
+          <TableNotes items={activityTableNotes} />
         </Panel>
       </section>
 

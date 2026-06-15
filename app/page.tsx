@@ -53,6 +53,15 @@ type ActivityRow = {
   couponCount: number;
 };
 
+type ActivitySummaryRow = {
+  activityName: string;
+  redemptionAmount: number;
+  activityGmv: number;
+  promoFeeRatio: number | null;
+  activityRoi: number | null;
+  couponCount: number;
+};
+
 type Aggregate = {
   gmv: number;
   quantity: number;
@@ -73,6 +82,8 @@ type Aggregate = {
   targetAchievement: number | null;
   paceAchievement: number | null;
 };
+
+type NamedAggregate = { name: string } & Aggregate;
 
 type DataShape = {
   metadata: {
@@ -126,6 +137,8 @@ const REGION_ALL = "all";
 const PRODUCT_ALL = "all";
 const DATE_RANGE_ALL = "all";
 const DATA_FILE = "dashboard-data.json";
+const TOP_ROW_LIMIT = 10;
+const OTHER_LABEL = "其它";
 const GROUP_ORDER = ["CBC", "CIB", "NX", "XJ", "YN", "华中", "未识别"];
 const CHANNEL_ORDER = [
   "酒类专营店",
@@ -155,6 +168,11 @@ type DateRangeOption = {
 type DateDayOption = {
   offset: number;
   label: string;
+};
+
+type ExpandedChart = {
+  title: string;
+  content: React.ReactNode;
 };
 
 const DEFAULT_DATE_RANGE: DateRangeOption = {
@@ -600,7 +618,18 @@ function activityShareAlert(value: number | null | undefined): string | null {
 }
 
 function customerizeNarrative(text: string): string {
-  return text;
+  return [
+    ["承压", "下降或低于预期"],
+    ["承接", "活动结束后还能留下的自然销量"],
+    ["修复目标", "追回目标差距"],
+    ["修复", "追回"],
+    ["降权", "减少资源投入"],
+    ["低效", "花钱效果偏弱"],
+    ["活动机制", "活动规则"],
+    ["机制", "规则"],
+    ["控费比", "控制费用占比"],
+    ["费比", "费用占GMV比例"],
+  ].reduce((result, [from, to]) => result.replaceAll(from, to), text);
 }
 
 function periodLabel(data: DataShape, periodId: string): string {
@@ -772,7 +801,7 @@ function gmvStatus(row: Aggregate, rowWow: number | null, includeTargetBudget: b
     return row.targetAchievement >= row.timeProgress ? "进度领先" : "需追赶";
   }
   if (rowWow === null) return "待观察";
-  return rowWow >= 0 ? "环比增长" : "环比承压";
+  return rowWow >= 0 ? "环比增长" : "环比下降";
 }
 
 function targetStatus(row: Aggregate): CoreMetric["status"] {
@@ -806,6 +835,8 @@ function ComboBarLineChart({
   barFormatter = formatMoney,
   lineFormatter = formatPercent,
   lineMax,
+  expanded = false,
+  onExpand,
 }: {
   title: string;
   rows: ComboChartRow[];
@@ -816,14 +847,16 @@ function ComboBarLineChart({
   barFormatter?: (value: number | null | undefined) => string;
   lineFormatter?: (value: number | null | undefined) => string;
   lineMax?: number;
+  expanded?: boolean;
+  onExpand?: () => void;
 }) {
-  const chartRows = rows.slice(0, 14);
-  const width = 760;
-  const height = 360;
+  const chartRows = expanded ? rows : rows.slice(0, 14);
+  const width = expanded ? Math.max(900, chartRows.length * 72 + 116) : 760;
+  const height = expanded ? 430 : 360;
   const left = 58;
   const right = 58;
   const top = 44;
-  const bottom = 82;
+  const bottom = expanded ? 112 : 82;
   const plotWidth = width - left - right;
   const plotHeight = height - top - bottom;
   const plotBottom = top + plotHeight;
@@ -846,19 +879,41 @@ function ComboBarLineChart({
       })
       .filter(Boolean)
       .join(" ");
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLElement>) => {
+    if (!onExpand) return;
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      onExpand();
+    }
+  };
 
   return (
-    <article className="summary-chart-card">
+    <article
+      className={classNames("summary-chart-card", onExpand && "clickable-chart", expanded && "expanded-chart")}
+      onClick={onExpand}
+      onKeyDown={handleKeyDown}
+      role={onExpand ? "button" : undefined}
+      tabIndex={onExpand ? 0 : undefined}
+    >
       <div className="summary-chart-heading">
         <h3>{title}</h3>
-        <div className="chart-legend">
-          <span className="legend-bar">{barName}</span>
-          {bar2Name ? <span className="legend-bar-2">{bar2Name}</span> : null}
-          <span className="legend-primary">{primaryName}</span>
-          {secondaryName ? <span className="legend-secondary">{secondaryName}</span> : null}
+        <div className="chart-heading-tools">
+          <div className="chart-legend">
+            <span className="legend-bar">{barName}</span>
+            {bar2Name ? <span className="legend-bar-2">{bar2Name}</span> : null}
+            <span className="legend-primary">{primaryName}</span>
+            {secondaryName ? <span className="legend-secondary">{secondaryName}</span> : null}
+          </div>
+          {onExpand ? <span className="chart-expand-hint">点击放大</span> : null}
         </div>
       </div>
-      <svg className="summary-chart" viewBox={`0 0 ${width} ${height}`} role="img" aria-label={title}>
+      <svg
+        className="summary-chart"
+        viewBox={`0 0 ${width} ${height}`}
+        role="img"
+        aria-label={title}
+        style={expanded ? { minWidth: width } : undefined}
+      >
         {[0, 0.5, 1].map((ratio) => {
           const y = plotBottom - ratio * plotHeight;
           return (
@@ -923,7 +978,7 @@ function ComboBarLineChart({
                 textAnchor="end"
                 transform={`rotate(-42 ${x} ${plotBottom + 28})`}
               >
-                {chartLabel(row.label)}
+                {expanded ? row.label : chartLabel(row.label)}
               </text>
             </g>
           );
@@ -967,19 +1022,23 @@ function SimpleBarChart({
   rows,
   barName,
   formatter = formatPercent,
+  expanded = false,
+  onExpand,
 }: {
   title: string;
   rows: ComboChartRow[];
   barName: string;
   formatter?: (value: number | null | undefined) => string;
+  expanded?: boolean;
+  onExpand?: () => void;
 }) {
-  const chartRows = rows.slice(0, 14);
-  const width = 760;
-  const height = 330;
+  const chartRows = expanded ? rows : rows.slice(0, 14);
+  const width = expanded ? Math.max(900, chartRows.length * 70 + 76) : 760;
+  const height = expanded ? 400 : 330;
   const left = 54;
   const right = 22;
   const top = 42;
-  const bottom = 78;
+  const bottom = expanded ? 108 : 78;
   const plotWidth = width - left - right;
   const plotHeight = height - top - bottom;
   const plotBottom = top + plotHeight;
@@ -988,16 +1047,38 @@ function SimpleBarChart({
   const barMax = nicePercentMax(chartRows.map((row) => row.bar), 0.2);
   const xFor = (index: number) => left + step * index + step / 2;
   const yFor = (value: number) => plotBottom - (Math.max(value, 0) / barMax) * plotHeight;
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLElement>) => {
+    if (!onExpand) return;
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      onExpand();
+    }
+  };
 
   return (
-    <article className="summary-chart-card">
+    <article
+      className={classNames("summary-chart-card", onExpand && "clickable-chart", expanded && "expanded-chart")}
+      onClick={onExpand}
+      onKeyDown={handleKeyDown}
+      role={onExpand ? "button" : undefined}
+      tabIndex={onExpand ? 0 : undefined}
+    >
       <div className="summary-chart-heading">
         <h3>{title}</h3>
-        <div className="chart-legend">
-          <span className="legend-bar">{barName}</span>
+        <div className="chart-heading-tools">
+          <div className="chart-legend">
+            <span className="legend-bar">{barName}</span>
+          </div>
+          {onExpand ? <span className="chart-expand-hint">点击放大</span> : null}
         </div>
       </div>
-      <svg className="summary-chart" viewBox={`0 0 ${width} ${height}`} role="img" aria-label={title}>
+      <svg
+        className="summary-chart"
+        viewBox={`0 0 ${width} ${height}`}
+        role="img"
+        aria-label={title}
+        style={expanded ? { minWidth: width } : undefined}
+      >
         {[0, 0.5, 1].map((ratio) => {
           const y = plotBottom - ratio * plotHeight;
           return (
@@ -1033,7 +1114,7 @@ function SimpleBarChart({
                 textAnchor="end"
                 transform={`rotate(-42 ${x} ${plotBottom + 28})`}
               >
-                {chartLabel(row.label)}
+                {expanded ? row.label : chartLabel(row.label)}
               </text>
             </g>
           );
@@ -1194,6 +1275,37 @@ function collectCoreSkuRows(
   return Array.from(grouped.entries())
     .map(([name, bucket]) => ({ name, ...aggregateRows(bucket) }))
     .sort((a, b) => b.gmv - a.gmv);
+}
+
+function topAggregateRows(rows: NamedAggregate[], limit = TOP_ROW_LIMIT): NamedAggregate[] {
+  const topRows = rows.slice(0, limit);
+  const restRows = rows.slice(limit);
+  if (!restRows.length) return topRows;
+  return [...topRows, { name: OTHER_LABEL, ...aggregateRows(restRows) }];
+}
+
+function aggregateActivityRows(rows: ActivitySummaryRow[], activityName = OTHER_LABEL): ActivitySummaryRow {
+  const totals = rows.reduce(
+    (sum, row) => ({
+      redemptionAmount: sum.redemptionAmount + row.redemptionAmount,
+      activityGmv: sum.activityGmv + row.activityGmv,
+      couponCount: sum.couponCount + row.couponCount,
+    }),
+    { redemptionAmount: 0, activityGmv: 0, couponCount: 0 },
+  );
+  return {
+    activityName,
+    ...totals,
+    promoFeeRatio: safeRatio(totals.redemptionAmount, totals.activityGmv),
+    activityRoi: safeRatio(totals.activityGmv, totals.redemptionAmount),
+  };
+}
+
+function topActivityRows(rows: ActivitySummaryRow[], limit = TOP_ROW_LIMIT): ActivitySummaryRow[] {
+  const topRows = rows.slice(0, limit);
+  const restRows = rows.slice(limit);
+  if (!restRows.length) return topRows;
+  return [...topRows, aggregateActivityRows(restRows)];
 }
 
 function buildNarrative({
@@ -1545,7 +1657,17 @@ function Dashboard({ data }: { data: DataShape }) {
   const [dateEndOffset, setDateEndOffset] = useState<number | null>(null);
   const [region, setRegion] = useState(REGION_ALL);
   const [product, setProduct] = useState(PRODUCT_ALL);
+  const [expandedChart, setExpandedChart] = useState<ExpandedChart | null>(null);
   const period = data.metadata.currentPeriodId;
+
+  useEffect(() => {
+    if (!expandedChart) return undefined;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setExpandedChart(null);
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [expandedChart]);
 
   const dateDayOptions = useMemo(() => buildDateDayOptions(data), [data]);
   const maxDateOffset = dateDayOptions[dateDayOptions.length - 1]?.offset ?? 0;
@@ -1814,6 +1936,10 @@ function Dashboard({ data }: { data: DataShape }) {
       ),
     [data, selectedPlatforms, selectedLeaves, effectiveProduct, availableCoreProductGroups, selectedDateRange],
   );
+  const displayCoreSkuRows = useMemo(() => topAggregateRows(coreSkuRows), [coreSkuRows]);
+  const displayPreviousCoreSkuRows = useMemo(() => topAggregateRows(previousCoreSkuRows), [previousCoreSkuRows]);
+  const displayLastYearCoreSkuRows = useMemo(() => topAggregateRows(lastYearCoreSkuRows), [lastYearCoreSkuRows]);
+  const displayActivities = useMemo(() => topActivityRows(activities), [activities]);
   const scopeOptions = useMemo(() => buildScopeOptions(data, platform), [data, platform]);
   const coreMetricRows = useMemo(
     () =>
@@ -1937,9 +2063,7 @@ function Dashboard({ data }: { data: DataShape }) {
           effectiveProduct,
           availableCoreProductGroups,
           selectedDateRange,
-        )
-          .slice(0, 8)
-          .map((row) => ({
+        ).map((row) => ({
             label: row.name,
             bar: row.gmv,
             barLabel: formatMoney(row.gmv),
@@ -2178,55 +2302,138 @@ function Dashboard({ data }: { data: DataShape }) {
       <section className="summary-section">
         <Panel title="Summary" kicker="图形表达按当前筛选区分双平台与单平台">
           <div className="summary-scope-stack">
-            {summaryPanels.map((scope) => (
-              <div className="summary-scope" key={scope.id}>
-                <div className="summary-scope-title">
-                  <span>{scope.label}</span>
-                  <small>{selectedDateLabel} · {selectedRegionLabel(region)} · {selectedProductLabel}</small>
-                </div>
-                <div className="summary-chart-grid">
-                  {includeTargetBudget ? (
+            {summaryPanels.map((scope) => {
+              const regionGmvTitle = includeTargetBudget
+                ? `${scope.label}-区域GMV及达成情况`
+                : `${scope.label}-区域GMV分布`;
+              const channelTitle = `${scope.label}-渠道GMV分布`;
+              const budgetTitle = `${scope.label}-区域预算使用情况`;
+              const promoFeeTitle = `${scope.label}-区域促销费比`;
+              const channelLineMax = nicePercentMax(scope.channelRows.flatMap((row) => [row.primary, row.secondary]), 0.6);
+              return (
+                <div className="summary-scope" key={scope.id}>
+                  <div className="summary-scope-title">
+                    <span>{scope.label}</span>
+                    <small>{selectedDateLabel} · {selectedRegionLabel(region)} · {selectedProductLabel}</small>
+                  </div>
+                  <div className="summary-chart-grid">
+                    {includeTargetBudget ? (
+                      <ComboBarLineChart
+                        title={regionGmvTitle}
+                        rows={scope.regionSummaryRows}
+                        barName="全量GMV"
+                        primaryName="目标GMV达成率"
+                        secondaryName="时间进度"
+                        onExpand={() =>
+                          setExpandedChart({
+                            title: regionGmvTitle,
+                            content: (
+                              <ComboBarLineChart
+                                title={regionGmvTitle}
+                                rows={scope.regionSummaryRows}
+                                barName="全量GMV"
+                                primaryName="目标GMV达成率"
+                                secondaryName="时间进度"
+                                expanded
+                              />
+                            ),
+                          })
+                        }
+                      />
+                    ) : (
+                      <SimpleBarChart
+                        title={regionGmvTitle}
+                        rows={scope.regionSummaryRows}
+                        barName="全量GMV"
+                        formatter={formatMoney}
+                        onExpand={() =>
+                          setExpandedChart({
+                            title: regionGmvTitle,
+                            content: (
+                              <SimpleBarChart
+                                title={regionGmvTitle}
+                                rows={scope.regionSummaryRows}
+                                barName="全量GMV"
+                                formatter={formatMoney}
+                                expanded
+                              />
+                            ),
+                          })
+                        }
+                      />
+                    )}
                     <ComboBarLineChart
-                      title={`${scope.label}-区域GMV及达成情况`}
-                      rows={scope.regionSummaryRows}
+                      title={channelTitle}
+                      rows={scope.channelRows}
                       barName="全量GMV"
-                      primaryName="目标GMV达成率"
-                      secondaryName="时间进度"
+                      primaryName="全量GMV占比"
+                      secondaryName={includeTargetBudget ? "时间进度" : undefined}
+                      lineMax={channelLineMax}
+                      onExpand={() =>
+                        setExpandedChart({
+                          title: channelTitle,
+                          content: (
+                            <ComboBarLineChart
+                              title={channelTitle}
+                              rows={scope.channelRows}
+                              barName="全量GMV"
+                              primaryName="全量GMV占比"
+                              secondaryName={includeTargetBudget ? "时间进度" : undefined}
+                              lineMax={channelLineMax}
+                              expanded
+                            />
+                          ),
+                        })
+                      }
                     />
-                  ) : (
+                    {includeTargetBudget ? (
+                      <ComboBarLineChart
+                        title={budgetTitle}
+                        rows={scope.budgetSummaryRows}
+                        barName="已使用预算金额"
+                        bar2Name="剩余预算金额"
+                        primaryName="促销预算使用率"
+                        lineMax={1}
+                        onExpand={() =>
+                          setExpandedChart({
+                            title: budgetTitle,
+                            content: (
+                              <ComboBarLineChart
+                                title={budgetTitle}
+                                rows={scope.budgetSummaryRows}
+                                barName="已使用预算金额"
+                                bar2Name="剩余预算金额"
+                                primaryName="促销预算使用率"
+                                lineMax={1}
+                                expanded
+                              />
+                            ),
+                          })
+                        }
+                      />
+                    ) : null}
                     <SimpleBarChart
-                      title={`${scope.label}-区域GMV分布`}
-                      rows={scope.regionSummaryRows}
-                      barName="全量GMV"
-                      formatter={formatMoney}
+                      title={promoFeeTitle}
+                      rows={scope.promoFeeRows}
+                      barName="促销费比"
+                      onExpand={() =>
+                        setExpandedChart({
+                          title: promoFeeTitle,
+                          content: (
+                            <SimpleBarChart
+                              title={promoFeeTitle}
+                              rows={scope.promoFeeRows}
+                              barName="促销费比"
+                              expanded
+                            />
+                          ),
+                        })
+                      }
                     />
-                  )}
-                  <ComboBarLineChart
-                    title={`${scope.label}-渠道GMV分布`}
-                    rows={scope.channelRows}
-                    barName="全量GMV"
-                    primaryName="全量GMV占比"
-                    secondaryName={includeTargetBudget ? "时间进度" : undefined}
-                    lineMax={nicePercentMax(scope.channelRows.flatMap((row) => [row.primary, row.secondary]), 0.6)}
-                  />
-                  {includeTargetBudget ? (
-                    <ComboBarLineChart
-                      title={`${scope.label}-区域预算使用情况`}
-                      rows={scope.budgetSummaryRows}
-                      barName="已使用预算金额"
-                      bar2Name="剩余预算金额"
-                      primaryName="促销预算使用率"
-                      lineMax={1}
-                    />
-                  ) : null}
-                  <SimpleBarChart
-                    title={`${scope.label}-区域促销费比`}
-                    rows={scope.promoFeeRows}
-                    barName="促销费比"
-                  />
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
           <p className="unit-note">
             单位说明：金额源表单位为元，页面按元/万/亿自动缩写；占比、达成率、费比、折扣率均为百分比；
@@ -2314,7 +2521,7 @@ function Dashboard({ data }: { data: DataShape }) {
                     <tr
                       className={clickable ? "clickable-row" : "total-row"}
                       key={node}
-                      onClick={() => clickable && setRegion(node)}
+                      onClick={() => clickable && setRegion(region === node ? REGION_ALL : node)}
                     >
                       <th>{node}</th>
                       <td>{formatMoney(row.gmv)}</td>
@@ -2506,13 +2713,19 @@ function Dashboard({ data }: { data: DataShape }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {coreSkuRows.map((row) => {
-                    const prev = findNamed(previousCoreSkuRows, row.name);
-                    const last = findNamed(lastYearCoreSkuRows, row.name);
+                  {displayCoreSkuRows.map((row) => {
+                    const prev =
+                      row.name === OTHER_LABEL
+                        ? findNamed(displayPreviousCoreSkuRows, row.name)
+                        : findNamed(previousCoreSkuRows, row.name);
+                    const last =
+                      row.name === OTHER_LABEL
+                        ? findNamed(displayLastYearCoreSkuRows, row.name)
+                        : findNamed(lastYearCoreSkuRows, row.name);
                     const rowWow = prev ? compareAggregate(row, prev) : null;
                     const rowYoy = last ? compareAggregate(row, last) : null;
                     return (
-                      <tr key={row.name}>
+                      <tr className={row.name === OTHER_LABEL ? "total-row" : undefined} key={row.name}>
                         <th>{row.name}</th>
                         <td>{formatMoney(row.gmv)}</td>
                         <td>{formatPercent(safeRatio(row.gmv, current.gmv))}</td>
@@ -2546,17 +2759,19 @@ function Dashboard({ data }: { data: DataShape }) {
                   <th>活动名称</th>
                   <th>核销金额</th>
                   <th>活动GMV</th>
+                  <th>活动GMV占比</th>
                   <th>促销费比</th>
                   <th>活动ROI</th>
                   <th>核券量</th>
                 </tr>
               </thead>
               <tbody>
-                {activities.slice(0, 15).map((row) => (
-                  <tr key={row.activityName}>
+                {displayActivities.map((row) => (
+                  <tr className={row.activityName === OTHER_LABEL ? "total-row" : undefined} key={row.activityName}>
                     <th>{row.activityName}</th>
                     <td>{formatMoney(row.redemptionAmount)}</td>
                     <td>{formatMoney(row.activityGmv)}</td>
+                    <td>{formatPercent(safeRatio(row.activityGmv, current.activityGmv))}</td>
                     <td
                       className={classNames(
                         includeTargetBudget &&
@@ -2577,6 +2792,26 @@ function Dashboard({ data }: { data: DataShape }) {
           </div>
         </Panel>
       </section>
+
+      {expandedChart ? (
+        <div className="chart-modal-backdrop" onClick={() => setExpandedChart(null)}>
+          <section
+            className="chart-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-label={expandedChart.title}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="chart-modal-heading">
+              <h2>{expandedChart.title}</h2>
+              <button type="button" onClick={() => setExpandedChart(null)}>
+                关闭
+              </button>
+            </div>
+            {expandedChart.content}
+          </section>
+        </div>
+      ) : null}
 
     </main>
   );

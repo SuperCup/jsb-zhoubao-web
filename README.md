@@ -50,4 +50,9 @@ http://127.0.0.1:3000/
 
 ## 部署
 
-项目使用 Sites 托管，部署配置位于 `.openai/hosting.json`。当前站点 ID 已写入该配置文件。发布前需要先通过 `npm run build` 验证构建产物。
+项目采用“测试先行、正式发布需群内确认”的发布规则，详见 [docs/发布流程.md](docs/发布流程.md)。
+
+- 测试地址：`https://supercup.github.io/jsb-zhoubao-web/`
+- 正式地址：`https://agent.ismartgo.com/carlsberg/weekly`
+
+推送 `main` 后，GitHub Actions 会自动构建并发布到 `gh-pages` 分支，对应测试地址。正式地址不会自动发布，必须等群成员验证测试地址并明确允许后，才可通过 `agent.ismartgo.com` 管理后台或 API 发布。

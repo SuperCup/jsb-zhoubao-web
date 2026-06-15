@@ -1308,6 +1308,21 @@ function topActivityRows(rows: ActivitySummaryRow[], limit = TOP_ROW_LIMIT): Act
   return [...topRows, aggregateActivityRows(restRows)];
 }
 
+function tableNotes(items: Array<string | null | undefined>): string[] {
+  return items.filter((item): item is string => Boolean(item)).slice(0, 2);
+}
+
+function TableNotes({ items }: { items: string[] }) {
+  if (!items.length) return null;
+  return (
+    <div className="table-notes">
+      {items.map((item) => (
+        <p key={item}>{item}</p>
+      ))}
+    </div>
+  );
+}
+
 function buildNarrative({
   current,
   previous,
@@ -2128,6 +2143,72 @@ function Dashboard({ data }: { data: DataShape }) {
     ],
   );
 
+  const regionTableNotes = useMemo(() => {
+    const rows = regionRows.filter((row) => row.node !== "总计" && row.current.gmv > 0);
+    const topRegion = [...rows].sort((a, b) => b.current.gmv - a.current.gmv)[0];
+    const weakestRegion = [...rows]
+      .map((row) => ({ ...row, diff: row.current.gmv - row.previous.gmv }))
+      .sort((a, b) => a.diff - b.diff)[0];
+    return tableNotes([
+      topRegion
+        ? `${topRegion.node}贡献最高，GMV ${formatMoney(topRegion.current.gmv)}，占当前范围 ${formatPercent(safeRatio(topRegion.current.gmv, current.gmv))}。`
+        : null,
+      weakestRegion
+        ? weakestRegion.diff < 0
+          ? `${weakestRegion.node}环比减少 ${formatMoney(Math.abs(weakestRegion.diff))}，优先看渠道和活动是否拖累。`
+          : `${weakestRegion.node}环比增量较弱，继续观察费用和供给承接。`
+        : null,
+    ]);
+  }, [current.gmv, regionRows]);
+
+  const channelTableNotes = useMemo(() => {
+    const topChannel = channels[0];
+    const highFeeChannel = channels
+      .filter((row) => row.gmv > current.gmv * 0.03 && row.promoFeeRatio !== null)
+      .sort((a, b) => (b.promoFeeRatio ?? 0) - (a.promoFeeRatio ?? 0))[0];
+    return tableNotes([
+      topChannel
+        ? `${topChannel.name}贡献最高，GMV ${formatMoney(topChannel.gmv)}，占当前范围 ${formatPercent(safeRatio(topChannel.gmv, current.gmv))}。`
+        : null,
+      highFeeChannel
+        ? `${highFeeChannel.name}费比 ${formatPercent(highFeeChannel.promoFeeRatio)}，建议复盘券门槛和商品承接。`
+        : `渠道费比整体平稳，重点看高GMV渠道能否继续放量。`,
+    ]);
+  }, [channels, current.gmv]);
+
+  const brandTableNotes = useMemo(() => {
+    const topBrand = brands[0];
+    const topThreeShare = brands
+      .slice(0, 3)
+      .reduce((sum, row) => sum + (safeRatio(row.gmv, current.gmv) ?? 0), 0);
+    const activityHeavyBrand = brands
+      .filter((row) => row.gmv > current.gmv * 0.01 && row.activityShare !== null)
+      .sort((a, b) => (b.activityShare ?? 0) - (a.activityShare ?? 0))[0];
+    return tableNotes([
+      topBrand
+        ? `${topBrand.name}贡献最高，前三品牌合计占比 ${formatPercent(topThreeShare)}。`
+        : null,
+      activityHeavyBrand
+        ? `${activityHeavyBrand.name}活动GMV占比 ${formatPercent(activityHeavyBrand.activityShare)}，需关注自然销售承接。`
+        : null,
+    ]);
+  }, [brands, current.gmv]);
+
+  const activityTableNotes = useMemo(() => {
+    const topActivity = displayActivities.find((row) => row.activityName !== OTHER_LABEL);
+    const highFeeActivity = displayActivities
+      .filter((row) => row.activityName !== OTHER_LABEL && row.promoFeeRatio !== null)
+      .sort((a, b) => (b.promoFeeRatio ?? 0) - (a.promoFeeRatio ?? 0))[0];
+    return tableNotes([
+      topActivity
+        ? `${topActivity.activityName}活动GMV最高，占整体活动GMV ${formatPercent(safeRatio(topActivity.activityGmv, current.activityGmv))}。`
+        : null,
+      highFeeActivity
+        ? `${highFeeActivity.activityName}费比 ${formatPercent(highFeeActivity.promoFeeRatio)}，建议优先复盘活动效率。`
+        : null,
+    ]);
+  }, [current.activityGmv, displayActivities]);
+
   const generated = new Date(data.metadata.generatedAt).toLocaleString("zh-CN", {
     month: "2-digit",
     day: "2-digit",
@@ -2260,7 +2341,7 @@ function Dashboard({ data }: { data: DataShape }) {
         <Panel title="经营诊断" kicker={`${selectedScopeLabel} · ${selectedRegionLabel(region)} · ${selectedDateLabel}`}>
           <div className="diagnostic-grid executive-grid">
             <article className="diagnostic-card">
-              <h3>本周结论</h3>
+              <h3>生意小结</h3>
               <ul className="narrative-list">
                 {narrative.conclusions.map((item) => (
                   <li key={item}>{item}</li>
@@ -2268,7 +2349,7 @@ function Dashboard({ data }: { data: DataShape }) {
               </ul>
             </article>
             <article className="diagnostic-card">
-              <h3>重点风险</h3>
+              <h3>重点关注</h3>
               <ul className="narrative-list">
                 {narrative.risks.map((item) => (
                   <li key={item}>{item}</li>
@@ -2276,27 +2357,9 @@ function Dashboard({ data }: { data: DataShape }) {
               </ul>
             </article>
             <article className="diagnostic-card">
-              <h3>下周动作</h3>
+              <h3>行动建议</h3>
               <ol className="narrative-list ordered">
                 {narrative.actions.map((item) => (
-                  <li key={item}>{item}</li>
-                ))}
-              </ol>
-            </article>
-          </div>
-          <div className="diagnostic-detail-grid">
-            <article className="diagnostic-card">
-              <h3>诊断分析</h3>
-              <ul className="narrative-list">
-                {narrative.analysis.slice(0, 4).map((item) => (
-                  <li key={item}>{item}</li>
-                ))}
-              </ul>
-            </article>
-            <article className="diagnostic-card playbook-card">
-              <h3>区域行动 Playbook</h3>
-              <ol className="narrative-list ordered">
-                {narrative.playbook.slice(0, 4).map((item) => (
                   <li key={item}>{item}</li>
                 ))}
               </ol>
@@ -2486,6 +2549,7 @@ function Dashboard({ data }: { data: DataShape }) {
               </tbody>
             </table>
           </div>
+          <TableNotes items={regionTableNotes} />
         </Panel>
       </section>
 
@@ -2552,6 +2616,7 @@ function Dashboard({ data }: { data: DataShape }) {
               </tbody>
             </table>
           </div>
+          <TableNotes items={channelTableNotes} />
         </Panel>
       </section>
 
@@ -2599,6 +2664,7 @@ function Dashboard({ data }: { data: DataShape }) {
               </tbody>
             </table>
           </div>
+          <TableNotes items={brandTableNotes} />
         </Panel>
       </section>
 
@@ -2691,6 +2757,7 @@ function Dashboard({ data }: { data: DataShape }) {
               </tbody>
             </table>
           </div>
+          <TableNotes items={activityTableNotes} />
         </Panel>
       </section>
 

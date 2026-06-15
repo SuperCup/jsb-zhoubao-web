@@ -8,6 +8,15 @@
       content="嘉士伯淘宝闪购与京东秒送周报网页数据看板"
     />
     <title>嘉士伯即时零售经营周报</title>
+    <script>
+      (function () {
+        var path = window.location.pathname;
+        var lastSegment = path.split("/").pop() || "";
+        if (path && !path.endsWith("/") && !lastSegment.includes(".")) {
+          window.location.replace(path + "/" + window.location.search + window.location.hash);
+        }
+      })();
+    </script>
     <link rel="icon" href="/favicon.svg" />
   </head>
   <body>

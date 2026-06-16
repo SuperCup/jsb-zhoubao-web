@@ -397,12 +397,12 @@ def enrich_record(base: dict[str, Any]) -> dict[str, Any]:
         "supportBudget",
         "targetGmv",
         "lastYearTargetGmv",
-        "actualTmFeeRatio",
-        "lastYearTmFeeRatio",
-        "targetPromoFeeRatio",
     ]:
         if key in base:
             base[key] = round_float(base[key], 2)
+    for key in ["actualTmFeeRatio", "lastYearTmFeeRatio", "targetPromoFeeRatio"]:
+        if key in base:
+            base[key] = round_float(base[key])
     return base
 
 

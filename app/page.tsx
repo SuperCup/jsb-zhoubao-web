@@ -464,7 +464,7 @@ function aggregateRows(rows: MetricRow[]): Aggregate {
   return {
     ...totals,
     targetPromoFeeRatio,
-    actualTmFeeRatio: sumUniquePlatformRatio(rows, "actualTmFeeRatio"),
+    actualTmFeeRatio: averageUniquePlatformRatio(rows, "actualTmFeeRatio"),
     activityShare: safeRatio(totals.activityGmv, totals.gmv),
     promoFeeRatio: safeRatio(totals.subsidy, totals.gmv),
     activityDiscount:
@@ -479,7 +479,7 @@ function aggregateRows(rows: MetricRow[]): Aggregate {
   };
 }
 
-function sumUniquePlatformRatio(
+function averageUniquePlatformRatio(
   rows: MetricRow[],
   key: "actualTmFeeRatio" | "targetPromoFeeRatio",
 ): number | null {
@@ -491,7 +491,8 @@ function sumUniquePlatformRatio(
     }
   });
   if (!byPlatform.size) return null;
-  return Array.from(byPlatform.values()).reduce((sum, value) => sum + value, 0);
+  const values = Array.from(byPlatform.values());
+  return values.reduce((sum, value) => sum + value, 0) / values.length;
 }
 
 function weightedUniquePlatformRatio(

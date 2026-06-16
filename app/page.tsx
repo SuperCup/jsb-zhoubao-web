@@ -1155,6 +1155,10 @@ function compareAggregate(current: Aggregate, baseline: Aggregate): number | nul
   return safeRatio(current.gmv - baseline.gmv, baseline.gmv);
 }
 
+function compareValue(current: number, baseline: number): number | null {
+  return safeRatio(current - baseline, baseline);
+}
+
 function promoRatioChange(current: Aggregate, baseline: Aggregate): number | null {
   if (current.promoFeeRatio === null || baseline.promoFeeRatio === null) return null;
   return current.promoFeeRatio - baseline.promoFeeRatio;
@@ -1338,6 +1342,39 @@ function TableNotes({ title, items }: { title: string; items: string[] }) {
     </div>
   );
 }
+
+const BUSINESS_SUMMARY_TEXT = [
+  "MTD全量GMV达成1709.7万，环比+21.1%，同比+102.7%。",
+  "GMV目标达成率51.5%，超时间进度4.8pp。",
+  "经活动促销费比环比上周下降1pp，高于目标0.5pp。",
+  "预计全月达成3800万左右，达成率104%，费比8.5%控制在目标范围内。",
+];
+
+const FOCUS_TEXT = [
+  "活动GMV占比环比上周下降8个百分点，但绝对值仍高达60.1%。",
+  "华中BU整体达成率落后时间进度5个百分点，其中非湖南地区达成率仅39%。",
+  "XJ促销预算使用进度已达104%，超支2900元，预计全月超支3w左右。",
+];
+
+const ACTION_TEXT = [
+  "熔断低效促销：停掉CIB东南&华北所有ROI<7的券（38-8、69-15、29-6），重新分配预算至59-20和79-30混补。",
+  "目前整体费用使用率超时间进度±2%左右，针对因XJ预算熔断影响的活动消耗，加持BU劵，确保销售进度。",
+];
+
+const REGION_SUMMARY_TEXT = [
+  "BU达成小结：华中湖南达成53%，非湖南达成39%，仓店达成率为39%，慢时间进度6个百分点，连锁便利店与连锁超市同比分别负增长3.5%与14.4%。整体费比同比下降2%。",
+  "行动建议：针对华中非湖南区域的超市及便利店渠道，加推“49-10”与“79-15”剔乐堡全品牌券。",
+];
+
+const CHANNEL_SUMMARY_TEXT = [
+  "重点渠道达成小结：连锁便利渠道环比上月负增长14%，同比仅增长3%，费比同比下降2%。",
+  "行动建议：针对于目前核销率最高的劵为深夜小酒馆38-8与29-6，受XJ活动熔断影响，加持49-10乌苏与1664品牌劵。",
+];
+
+const ACTIVITY_SUMMARY_TEXT = [
+  "TOP机制小结：目前，ROI低于7的活动机制已基本熔断，仅保留以下两项：小酒馆渠道的“38-8”券，以及仓店与新供给混补券“59-20”。",
+  "针对不同预算渠道及BU加持券，具体配置如下：华中地区（不含湖南）加持品牌券：49-10、79-15；CIB整剔加持品牌券：79-15；连锁便利渠道加持品牌券：39-8。",
+];
 
 function buildNarrative({
   current,
@@ -1629,10 +1666,14 @@ function buildNarrative({
     },
   ];
 
+  void conclusions;
+  void risks;
+  void actions;
+
   return {
-    conclusions: conclusions.map(customerizeNarrative).slice(0, 3),
-    risks: (risks.length ? risks : analysis).map(customerizeNarrative).slice(0, 3),
-    actions: actions.map(customerizeNarrative).slice(0, 3),
+    conclusions: BUSINESS_SUMMARY_TEXT,
+    risks: FOCUS_TEXT,
+    actions: ACTION_TEXT,
     analysis: analysis.map(customerizeNarrative),
     playbook: playbook.map(customerizeNarrative),
     summary,
@@ -1994,6 +2035,9 @@ function Dashboard({ data }: { data: DataShape }) {
         );
         const rowWow = comparisonEnabled ? compareAggregate(row, rowPrevious) : null;
         const rowYoy = comparisonEnabled ? compareAggregate(row, rowLastYear) : null;
+        const activityGmvWow = comparisonEnabled ? compareValue(row.activityGmv, rowPrevious.activityGmv) : null;
+        const activityGmvYoy = comparisonEnabled ? compareValue(row.activityGmv, rowLastYear.activityGmv) : null;
+        const naturalGmv = row.gmv - row.activityGmv;
         const targetGap =
           row.targetAchievement !== null && row.timeProgress !== null
             ? row.targetAchievement - row.timeProgress
@@ -2035,12 +2079,20 @@ function Dashboard({ data }: { data: DataShape }) {
               ]
             : []),
           {
-            label: "活动GMV占比",
-            value: formatPercent(row.activityShare),
-            sub: `活动GMV ${formatMoney(row.activityGmv)}`,
+            label: "活动GMV",
+            value: formatMoney(row.activityGmv),
+            sub: `环比${formatDelta(activityGmvWow)} 同比${formatDelta(activityGmvYoy)}`,
             status: activityShareStatus(row.activityShare),
             statusTone: row.activityShare !== null && row.activityShare >= 0.7 ? "warn" : "neutral",
             tone: row.activityShare !== null && row.activityShare >= 0.7 ? "warn" : "neutral",
+          },
+          {
+            label: "自然GMV",
+            value: formatMoney(naturalGmv),
+            sub: `占比全量GMV ${formatPercent(safeRatio(naturalGmv, row.gmv))}`,
+            status: "自然销售",
+            statusTone: "neutral",
+            tone: "neutral",
           },
         ];
         return { ...scope, metrics };
@@ -2160,37 +2212,12 @@ function Dashboard({ data }: { data: DataShape }) {
   );
 
   const regionTableNotes = useMemo(() => {
-    const rows = regionRows.filter((row) => row.node !== "总计" && row.current.gmv > 0);
-    const topRegion = [...rows].sort((a, b) => b.current.gmv - a.current.gmv)[0];
-    const weakestRegion = [...rows]
-      .map((row) => ({ ...row, diff: row.current.gmv - row.previous.gmv }))
-      .sort((a, b) => a.diff - b.diff)[0];
-    return tableNotes([
-      topRegion
-        ? `${topRegion.node}贡献最高，GMV ${formatMoney(topRegion.current.gmv)}，占当前范围 ${formatPercent(safeRatio(topRegion.current.gmv, current.gmv))}。`
-        : null,
-      weakestRegion
-        ? weakestRegion.diff < 0
-          ? `${weakestRegion.node}环比减少 ${formatMoney(Math.abs(weakestRegion.diff))}，优先看渠道和活动是否拖累。`
-          : `${weakestRegion.node}环比增量较弱，继续观察费用和供给是否到位。`
-        : null,
-    ]);
-  }, [current.gmv, regionRows]);
+    return tableNotes(REGION_SUMMARY_TEXT);
+  }, []);
 
   const channelTableNotes = useMemo(() => {
-    const topChannel = channels[0];
-    const highFeeChannel = channels
-      .filter((row) => row.gmv > current.gmv * 0.03 && row.promoFeeRatio !== null)
-      .sort((a, b) => (b.promoFeeRatio ?? 0) - (a.promoFeeRatio ?? 0))[0];
-    return tableNotes([
-      topChannel
-        ? `${topChannel.name}贡献最高，GMV ${formatMoney(topChannel.gmv)}，占当前范围 ${formatPercent(safeRatio(topChannel.gmv, current.gmv))}。`
-        : null,
-      highFeeChannel
-        ? `${highFeeChannel.name}费比 ${formatPercent(highFeeChannel.promoFeeRatio)}，建议复盘券门槛和商品销售。`
-        : `渠道费比整体平稳，重点看高GMV渠道能否继续放量。`,
-    ]);
-  }, [channels, current.gmv]);
+    return tableNotes(CHANNEL_SUMMARY_TEXT);
+  }, []);
 
   const brandTableNotes = useMemo(() => {
     const topBrand = brands[0];
@@ -2211,19 +2238,8 @@ function Dashboard({ data }: { data: DataShape }) {
   }, [brands, current.gmv]);
 
   const activityTableNotes = useMemo(() => {
-    const topActivity = displayActivities.find((row) => row.activityName !== OTHER_LABEL);
-    const highFeeActivity = displayActivities
-      .filter((row) => row.activityName !== OTHER_LABEL && row.promoFeeRatio !== null)
-      .sort((a, b) => (b.promoFeeRatio ?? 0) - (a.promoFeeRatio ?? 0))[0];
-    return tableNotes([
-      topActivity
-        ? `${topActivity.activityName}活动GMV最高，占整体活动GMV ${formatPercent(safeRatio(topActivity.activityGmv, current.activityGmv))}。`
-        : null,
-      highFeeActivity
-        ? `${highFeeActivity.activityName}费比 ${formatPercent(highFeeActivity.promoFeeRatio)}，建议优先复盘活动效率。`
-        : null,
-    ]);
-  }, [current.activityGmv, displayActivities]);
+    return tableNotes(ACTIVITY_SUMMARY_TEXT);
+  }, []);
 
   const generated = new Date(data.metadata.generatedAt).toLocaleString("zh-CN", {
     month: "2-digit",

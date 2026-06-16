@@ -249,8 +249,8 @@ select {
   padding: 16px 14px;
   display: flex;
   flex-direction: column;
-  align-items: center;
-  justify-content: center;
+  align-items: stretch;
+  justify-content: flex-start;
   text-align: center;
   overflow: hidden;
   border-top: 4px solid #1f2a44;
@@ -292,18 +292,19 @@ select {
 
 .core-metric-topline {
   display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
   width: 100%;
 }
 
 .core-metric-label {
+  flex: 1 1 auto;
   color: var(--muted);
   font-size: 12px;
   font-weight: 850;
   line-height: 1.2;
+  text-align: left;
 }
 
 .kpi-status {
@@ -338,7 +339,7 @@ select {
 
 .core-metric-value {
   max-width: 100%;
-  margin-top: 8px;
+  margin-top: auto;
   color: #1f2a44;
   font-size: clamp(28px, 3.1vw, 44px);
   font-weight: 900;
@@ -349,6 +350,7 @@ select {
 .core-metric-sub {
   max-width: 100%;
   margin-top: 8px;
+  margin-bottom: auto;
   color: var(--ink);
   font-size: 13px;
   line-height: 1.35;

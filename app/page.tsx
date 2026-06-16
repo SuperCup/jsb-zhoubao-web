@@ -2370,7 +2370,7 @@ function Dashboard({ data }: { data: DataShape }) {
       </section>
 
       <section className="diagnostic-section">
-        <Panel kicker={`${selectedScopeLabel} · ${selectedRegionLabel(region)} · ${selectedDateLabel}`}>
+        <Panel kicker="淘宝闪购 · 全国/全区域 · 6月1-14日">
           <div className="diagnostic-grid executive-grid">
             <article className="diagnostic-card">
               <h3>生意小结</h3>
@@ -2647,7 +2647,7 @@ function Dashboard({ data }: { data: DataShape }) {
               </tbody>
             </table>
           </div>
-          <TableNotes title="BY区域小结" items={regionTableNotes} />
+          <TableNotes title="淘宝闪购BY区域小结" items={regionTableNotes} />
         </Panel>
       </section>
 
@@ -2695,7 +2695,7 @@ function Dashboard({ data }: { data: DataShape }) {
               </tbody>
             </table>
           </div>
-          <TableNotes title="BY渠道小结" items={channelTableNotes} />
+          <TableNotes title="淘宝闪购BY渠道小结" items={channelTableNotes} />
         </Panel>
       </section>
 
@@ -2788,7 +2788,7 @@ function Dashboard({ data }: { data: DataShape }) {
               </tbody>
             </table>
           </div>
-          <TableNotes title="BY品牌小结" items={brandTableNotes} />
+          <TableNotes title="淘宝闪购BY品牌小结" items={brandTableNotes} />
         </Panel>
       </section>
 
@@ -2894,7 +2894,7 @@ function Dashboard({ data }: { data: DataShape }) {
               </tbody>
             </table>
           </div>
-          <TableNotes title="BY活动小结" items={activityTableNotes} />
+          <TableNotes title="淘宝闪购BY活动小结" items={activityTableNotes} />
         </Panel>
       </section>
 

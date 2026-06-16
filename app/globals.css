@@ -245,8 +245,13 @@ select {
 }
 
 .core-metric-card {
-  min-height: 150px;
-  padding: 18px 20px;
+  min-height: 136px;
+  padding: 16px 14px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
   overflow: hidden;
   border-top: 4px solid #1f2a44;
 }
@@ -287,15 +292,18 @@ select {
 
 .core-metric-topline {
   display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 10px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
 }
 
 .core-metric-label {
   color: var(--muted);
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 850;
+  line-height: 1.2;
 }
 
 .kpi-status {
@@ -305,7 +313,7 @@ select {
   padding: 4px 8px;
   color: var(--muted);
   background: #f2f6f4;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 850;
   line-height: 1;
 }
@@ -329,19 +337,21 @@ select {
 }
 
 .core-metric-value {
-  margin-top: 10px;
+  max-width: 100%;
+  margin-top: 8px;
   color: #1f2a44;
-  font-size: clamp(32px, 4.7vw, 72px);
+  font-size: clamp(28px, 3.1vw, 44px);
   font-weight: 900;
   line-height: 1.05;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 
 .core-metric-sub {
-  margin-top: 10px;
+  max-width: 100%;
+  margin-top: 8px;
   color: var(--ink);
-  font-size: 15px;
-  line-height: 1.45;
+  font-size: 13px;
+  line-height: 1.35;
 }
 
 .kpi-meta {

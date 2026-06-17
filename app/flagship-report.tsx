@@ -39,6 +39,7 @@ type FlagshipData = {
       start: string;
       end: string;
     };
+    channelOrder: string[];
     detailFiles: {
       full: string;
       bill: string;
@@ -129,7 +130,7 @@ function Panel({ title, children, subtitle }: { title: string; subtitle?: string
     <section className="panel">
       <div className="panel-title">
         <div>
-          <p>{subtitle ?? "淘宝闪购 · 京东秒送 · 6月1-14日"}</p>
+          <p>{subtitle ?? "淘宝闪购 · 官旗四渠道 · 6月1-14日"}</p>
           <h2>{title}</h2>
         </div>
       </div>
@@ -200,14 +201,14 @@ function SummaryTable({ rows, nameKey }: { rows: Breakdown[]; nameKey: keyof Bre
 }
 
 function buildNotes(data: FlagshipData): string[] {
-  const topPlatform = data.breakdowns.platforms[0];
   const topChannel = data.breakdowns.channels[0];
+  const topActivity = data.breakdowns.activities[0];
   return [
-    topPlatform
-      ? `1. ${topPlatform.platform}官旗GMV最高，贡献 ${formatMoney(topPlatform.gmv)}。`
-      : "",
     topChannel
-      ? `2. 主要销售来自${topChannel.channel}，活动GMV占比 ${formatPercent(topChannel.activityShare)}。`
+      ? `1. ${topChannel.channel}贡献最高，GMV ${formatMoney(topChannel.gmv)}，活动GMV ${formatMoney(topChannel.activityGmv)}。`
+      : "",
+    topActivity
+      ? `2. TOP活动为${topActivity.activityName}，活动GMV ${formatMoney(topActivity.activityGmv)}。`
       : "",
   ].filter(Boolean);
 }
@@ -276,9 +277,9 @@ export default function FlagshipReport() {
         <div>
           <p className="eyebrow">Carlsberg flagship weekly BI</p>
           <h1>嘉士伯官旗即时零售周报</h1>
-          <p className="header-subtitle">淘宝闪购 & 京东秒送｜{data.metadata.period.label}</p>
+          <p className="header-subtitle">淘宝闪购｜{data.metadata.period.label}</p>
           <div className="header-meta">
-            <span>官旗/酒小二口径</span>
+            <span>酒小二 / 惠宜选 / 永辉 / 西菲狸</span>
             <span>6月1-14日</span>
             <span>数据生成 {generated}</span>
           </div>
@@ -348,20 +349,12 @@ export default function FlagshipReport() {
           </div>
         </Panel>
 
-        <Panel title="平台表">
-          <SummaryTable rows={data.breakdowns.platforms} nameKey="platform" />
-        </Panel>
-
         <Panel title="区域表">
           <SummaryTable rows={data.breakdowns.regions} nameKey="region" />
         </Panel>
 
         <Panel title="渠道表">
           <SummaryTable rows={data.breakdowns.channels} nameKey="channel" />
-        </Panel>
-
-        <Panel title="TOP10商户表">
-          <SummaryTable rows={data.breakdowns.merchants} nameKey="merchant" />
         </Panel>
 
         <Panel title="品牌表">

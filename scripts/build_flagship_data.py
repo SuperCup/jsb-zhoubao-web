@@ -37,9 +37,11 @@ PERIOD = {
     },
 }
 
-FLAGSHIP_CLEAN_MERCHANTS = {"酒小二", "乌苏啤酒/WUSU"}
-FLAGSHIP_RAW_PATTERN = re.compile(r"酒小二|官方旗舰店")
-EXCLUDED_RAW_PATTERN = re.compile(r"帝亚吉欧")
+FLAGSHIP_PLATFORMS = {"taobao"}
+FLAGSHIP_CHANNELS = ["酒小二", "惠宜选", "永辉", "西菲狸"]
+HUIYIXUAN_PATTERN = re.compile(r"惠宜选|拾惠客|厉臣")
+YONGHUI_PATTERN = re.compile(r"永辉")
+XIFEILI_PATTERN = re.compile(r"西菲狸")
 
 
 def source_files(platform_id: str, suffix: str) -> list[Path]:
@@ -86,11 +88,19 @@ def parse_date(df: pd.DataFrame) -> pd.Series:
 
 
 def flagship_mask(df: pd.DataFrame) -> pd.Series:
+    return flagship_channel(df).ne("")
+
+
+def flagship_channel(df: pd.DataFrame) -> pd.Series:
     clean_merchant = text_series(df, "清洗_商户")
-    raw_merchant = first_existing(df, ["商户名称", "门店名称", "店铺名称", "商家名称"])
-    raw_match = raw_merchant.str.contains(FLAGSHIP_RAW_PATTERN, na=False)
-    excluded = raw_merchant.str.contains(EXCLUDED_RAW_PATTERN, na=False)
-    return clean_merchant.isin(FLAGSHIP_CLEAN_MERCHANTS) | (raw_match & ~excluded)
+    raw_merchant = first_existing(df, ["商户名称", "门店名称", "店铺名称", "商家名称", "零售商名称"])
+    supplier = text_series(df, "供应商名称")
+    channel = pd.Series([""] * len(df), index=df.index, dtype="object")
+    channel = channel.mask(clean_merchant.eq("酒小二") | raw_merchant.str.contains("酒小二", na=False), "酒小二")
+    channel = channel.mask(clean_merchant.eq("惠宜选") | raw_merchant.str.contains(HUIYIXUAN_PATTERN, na=False), "惠宜选")
+    channel = channel.mask(clean_merchant.eq("永辉超市") | raw_merchant.str.contains(YONGHUI_PATTERN, na=False), "永辉")
+    channel = channel.mask(supplier.str.contains(XIFEILI_PATTERN, na=False), "西菲狸")
+    return channel
 
 
 def normalize_full_detail(df: pd.DataFrame, platform_id: str, platform: dict[str, Any]) -> pd.DataFrame:
@@ -102,7 +112,8 @@ def normalize_full_detail(df: pd.DataFrame, platform_id: str, platform: dict[str
             "platformLabel": platform["label"],
             "date": parse_date(df),
             "region": text_series(df, "清洗_大区"),
-            "channel": text_series(df, "清洗_渠道"),
+            "channel": flagship_channel(df),
+            "sourceChannel": text_series(df, "清洗_渠道"),
             "merchant": text_series(df, "清洗_商户"),
             "rawMerchant": first_existing(df, ["商户名称", "门店名称", "店铺名称", "商家名称"]),
             "brand": text_series(df, "清洗_品牌"),
@@ -131,7 +142,8 @@ def normalize_bill_detail(df: pd.DataFrame, platform_id: str, platform: dict[str
             "platformLabel": platform["label"],
             "date": parse_date(df),
             "region": text_series(df, "清洗_大区"),
-            "channel": text_series(df, "清洗_渠道"),
+            "channel": flagship_channel(df),
+            "sourceChannel": text_series(df, "清洗_渠道"),
             "merchant": text_series(df, "清洗_商户"),
             "rawMerchant": first_existing(df, ["商户名称", "门店名称", "店铺名称", "商家名称"]),
             "brand": text_series(df, "清洗_品牌"),
@@ -163,11 +175,17 @@ def count_orders(full: pd.DataFrame) -> float:
 
 def aggregate_full(full: pd.DataFrame, column: str) -> pd.DataFrame:
     if full.empty or column not in full.columns:
-        return pd.DataFrame(columns=[column, "gmv", "quantity", "orders", "users"])
+        return pd.DataFrame(columns=[column, "gmv", "quantity", "orders", "users", "fullRows"])
 
     full_group = (
         full.groupby(column, dropna=False)
-        .agg(gmv=("gmv", "sum"), quantity=("quantity", "sum"), taobaoOrders=("orders", "sum"), users=("users", "sum"))
+        .agg(
+            gmv=("gmv", "sum"),
+            quantity=("quantity", "sum"),
+            taobaoOrders=("orders", "sum"),
+            users=("users", "sum"),
+            fullRows=("gmv", "size"),
+        )
         .reset_index()
     )
     jd = full[~full["platformId"].eq("taobao")].copy()
@@ -185,14 +203,19 @@ def aggregate_full(full: pd.DataFrame, column: str) -> pd.DataFrame:
 
 def aggregate_bill(bill: pd.DataFrame, column: str) -> pd.DataFrame:
     if bill.empty or column not in bill.columns:
-        return pd.DataFrame(columns=[column, "activityGmv", "subsidy", "couponCount"])
+        return pd.DataFrame(columns=[column, "activityGmv", "subsidy", "couponCount", "billRows"])
 
     bill = bill.copy()
     bill["couponKey"] = bill["platformId"].astype(str) + "::" + bill["orderId"].fillna("").astype(str).str.strip()
     bill.loc[bill["couponKey"].str.endswith("::"), "couponKey"] = pd.NA
     return (
         bill.groupby(column, dropna=False)
-        .agg(activityGmv=("activityGmv", "sum"), subsidy=("subsidy", "sum"), couponCount=("couponKey", "nunique"))
+        .agg(
+            activityGmv=("activityGmv", "sum"),
+            subsidy=("subsidy", "sum"),
+            couponCount=("couponKey", "nunique"),
+            billRows=("activityGmv", "size"),
+        )
         .reset_index()
     )
 
@@ -209,31 +232,43 @@ def aggregate(
     full_group = aggregate_full(full, column)
     bill_group = aggregate_bill(bill, column)
     merged = full_group.merge(bill_group, on=column, how="outer")
-    for metric_column in ["gmv", "quantity", "orders", "users", "activityGmv", "subsidy", "couponCount"]:
+    for metric_column in [
+        "gmv",
+        "quantity",
+        "orders",
+        "users",
+        "fullRows",
+        "activityGmv",
+        "subsidy",
+        "couponCount",
+        "billRows",
+    ]:
         if metric_column not in merged.columns:
             merged[metric_column] = 0
         merged[metric_column] = pd.to_numeric(merged[metric_column], errors="coerce").fillna(0)
     rows: list[dict[str, Any]] = []
     for _, row in merged.iterrows():
-        gmv = clean_number(row.get("gmv")) if has_full_column else None
-        activity_gmv = clean_number(row.get("activityGmv")) if has_bill_column else None
-        subsidy = clean_number(row.get("subsidy")) if has_bill_column else None
+        has_full_value = has_full_column and clean_number(row.get("fullRows")) > 0
+        has_bill_value = has_bill_column and clean_number(row.get("billRows")) > 0
+        gmv = clean_number(row.get("gmv")) if has_full_value else None
+        activity_gmv = clean_number(row.get("activityGmv")) if has_bill_value else None
+        subsidy = clean_number(row.get("subsidy")) if has_bill_value else None
         activity_gmv_for_calc = activity_gmv or 0
         subsidy_for_calc = subsidy or 0
         gmv_for_calc = gmv or 0
         rows.append(
             {
                 output_key: str(row.get(column) or "未识别"),
-                "gmv": round_float(gmv, 2) if has_full_column else None,
-                "quantity": round_float(row.get("quantity"), 2) if has_full_column else None,
-                "orders": round_float(row.get("orders"), 2) if has_full_column else None,
-                "users": round_float(row.get("users"), 2) if has_full_column else None,
-                "activityGmv": round_float(activity_gmv, 2) if has_bill_column else None,
-                "subsidy": round_float(subsidy, 2) if has_bill_column else None,
-                "couponCount": round_float(row.get("couponCount"), 0) if has_bill_column else None,
-                "activityShare": round_float(safe_div(activity_gmv_for_calc, gmv_for_calc)) if has_full_column else None,
-                "promoFeeRatio": round_float(safe_div(subsidy_for_calc, gmv_for_calc)) if has_full_column else None,
-                "activityRoi": round_float(safe_div(activity_gmv_for_calc, subsidy_for_calc)) if has_bill_column else None,
+                "gmv": round_float(gmv, 2) if has_full_value else None,
+                "quantity": round_float(row.get("quantity"), 2) if has_full_value else None,
+                "orders": round_float(row.get("orders"), 2) if has_full_value else None,
+                "users": round_float(row.get("users"), 2) if has_full_value else None,
+                "activityGmv": round_float(activity_gmv, 2) if has_bill_value else None,
+                "subsidy": round_float(subsidy, 2) if has_bill_value else None,
+                "couponCount": round_float(row.get("couponCount"), 0) if has_bill_value else None,
+                "activityShare": round_float(safe_div(activity_gmv_for_calc, gmv_for_calc)) if has_full_value else None,
+                "promoFeeRatio": round_float(safe_div(subsidy_for_calc, gmv_for_calc)) if has_full_value else None,
+                "activityRoi": round_float(safe_div(activity_gmv_for_calc, subsidy_for_calc)) if has_bill_value else None,
             }
         )
     rows.sort(key=lambda item: item.get(sort_key) or 0, reverse=True)
@@ -267,6 +302,8 @@ def build() -> dict[str, Any]:
     source_stats: list[dict[str, Any]] = []
 
     for platform_id, platform in PLATFORMS.items():
+        if platform_id not in FLAGSHIP_PLATFORMS:
+            continue
         full_df = read_period_frames(platform_id, platform["fullSuffix"])
         bill_df = read_period_frames(platform_id, platform["billSuffix"])
 
@@ -299,7 +336,8 @@ def build() -> dict[str, Any]:
             "title": "嘉士伯官旗即时零售周报",
             "generatedAt": pd.Timestamp.now().strftime("%Y-%m-%dT%H:%M:%S"),
             "period": PERIOD,
-            "definition": "官旗口径：清洗_商户为酒小二或乌苏啤酒/WUSU，或原始商户名包含官方旗舰店/酒小二；排除帝亚吉欧旗舰店。",
+            "definition": "官旗口径：仅淘宝闪购，按酒小二、惠宜选、永辉、西菲狸四个渠道归类；西菲狸来自账单供应商名称，缺全量数据时展示为空白。",
+            "channelOrder": FLAGSHIP_CHANNELS,
             "detailFiles": {
                 "full": FULL_DETAIL_CSV.name,
                 "bill": BILL_DETAIL_CSV.name,

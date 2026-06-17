@@ -23,6 +23,7 @@ OUTPUT_JSON = Path(
     os.environ.get("OUTPUT_JSON", WORKSPACE / "public" / "data" / "dashboard-data.json")
 )
 LOGIC_DOC = Path(os.environ.get("LOGIC_DOC", WORKSPACE / "docs" / "取数逻辑说明.md"))
+EXPENSE_UPDATE_FILE = SOURCE_DIR / "6月目标&费用更新.xlsx"
 
 CURRENT_PERIOD_ID = "0601-0614"
 PREVIOUS_PERIOD_ID = "0501-0514"
@@ -116,6 +117,16 @@ REGION_PARENT = {
     "未识别": "未识别",
 }
 
+REGION_GROUPS = {
+    "CBC": ["CBC-CQ", "CBC-SC"],
+    "CIB": ["CIB东南", "CIB华北", "CIB华南", "CIB苏皖"],
+    "华中": ["华中-湖南", "华中-非湖南"],
+    "NX": ["NX"],
+    "XJ": ["XJ"],
+    "YN": ["YN"],
+    "未识别": ["未识别"],
+}
+
 REGION_ORDER = [
     "CBC-CQ",
     "CBC-SC",
@@ -156,6 +167,10 @@ TAOBAO_WAREHOUSE_BILL_MERCHANTS = {
     "熊喵喝喝",
 }
 DATE_COLUMN_CANDIDATES = ["日期", "账单时间", "业务发生时间", "订单时间", "订单完成时间"]
+EXPENSE_PLATFORM_MAP = {
+    "淘宝闪购": "饿了么",
+    "京东秒送": "京东到家",
+}
 
 
 def clean_number(value: Any) -> float:
@@ -166,6 +181,73 @@ def clean_number(value: Any) -> float:
         if value in {"", "-", "*****"}:
             return 0.0
     return float(pd.to_numeric(value, errors="coerce") or 0.0)
+
+
+def assign_group_metric(
+    bu_budget: dict[tuple[str, int, str], dict[str, float]],
+    platform: str,
+    month_key: int,
+    region: str,
+    field: str,
+    value: float,
+) -> None:
+    if region in REGION_PARENT:
+        bu_budget.setdefault((platform, month_key, region), {})[field] = value
+        return
+
+    children = REGION_GROUPS.get(region)
+    if not children:
+        return
+
+    weights = [
+        clean_number(bu_budget.get((platform, month_key, child), {}).get("buTarget"))
+        for child in children
+    ]
+    weight_total = sum(weights)
+    if not weight_total:
+        weights = [1.0 for _ in children]
+        weight_total = sum(weights)
+
+    allocated_total = 0.0
+    for index, child in enumerate(children):
+        if index == len(children) - 1:
+            allocated = value - allocated_total
+        else:
+            allocated = value * weights[index] / weight_total
+            allocated_total += allocated
+        bu_budget.setdefault((platform, month_key, child), {})[field] = allocated
+
+
+def apply_expense_update(
+    bu_budget: dict[tuple[str, int, str], dict[str, float]],
+) -> None:
+    if not EXPENSE_UPDATE_FILE.exists():
+        return
+
+    raw = pd.read_excel(EXPENSE_UPDATE_FILE, sheet_name="6月整体费用", header=None)
+    platform_label = ""
+    for column_index in range(1, raw.shape[1]):
+        header_platform = raw.iat[0, column_index]
+        if pd.notna(header_platform):
+            platform_label = str(header_platform).strip()
+        metric_name = str(raw.iat[1, column_index]).strip()
+        if metric_name != "广告曝光费":
+            continue
+        platform = EXPENSE_PLATFORM_MAP.get(platform_label)
+        if not platform:
+            continue
+        for row_index in range(2, raw.shape[0]):
+            region = str(raw.iat[row_index, 0]).strip()
+            if region in {"", "nan", "None", "汇总", "总计"}:
+                continue
+            assign_group_metric(
+                bu_budget,
+                platform,
+                202606,
+                region,
+                "advertisingExposureFee",
+                clean_number(raw.iat[row_index, column_index]),
+            )
 
 
 def safe_div(numerator: float, denominator: float) -> float | None:
@@ -293,6 +375,7 @@ def load_targets() -> tuple[dict[tuple[str, int], dict[str, float]], dict[tuple[
             "supportBudget": clean_number(row.get("加持目标预算")),
         }
 
+    apply_expense_update(bu_budget)
     return platform_targets, bu_budget
 
 
@@ -395,6 +478,7 @@ def enrich_record(base: dict[str, Any]) -> dict[str, Any]:
         "budget",
         "buTarget",
         "supportBudget",
+        "advertisingExposureFee",
         "targetGmv",
         "lastYearTargetGmv",
     ]:
@@ -550,6 +634,7 @@ def build_product_records(
                     "budget": clean_number(budget.get("budget")),
                     "buTarget": clean_number(budget.get("buTarget")),
                     "supportBudget": clean_number(budget.get("supportBudget")),
+                    "advertisingExposureFee": clean_number(budget.get("advertisingExposureFee")),
                     "targetGmv": clean_number(platform_target.get("targetGmv")),
                     "lastYearTargetGmv": clean_number(platform_target.get("lastYearTargetGmv")),
                     "actualTmFeeRatio": clean_number(platform_target.get("actualTmFeeRatio")),
@@ -723,6 +808,7 @@ def build_data() -> dict[str, Any]:
                     "budget": clean_number(budget.get("budget")),
                     "buTarget": clean_number(budget.get("buTarget")),
                     "supportBudget": clean_number(budget.get("supportBudget")),
+                    "advertisingExposureFee": clean_number(budget.get("advertisingExposureFee")),
                     "targetGmv": clean_number(platform_target.get("targetGmv")),
                     "lastYearTargetGmv": clean_number(platform_target.get("lastYearTargetGmv")),
                     "actualTmFeeRatio": clean_number(platform_target.get("actualTmFeeRatio")),
@@ -836,15 +922,7 @@ def build_data() -> dict[str, Any]:
             "regionOrder": REGION_ORDER,
             "channelOrder": CHANNEL_ORDER,
             "regionParent": REGION_PARENT,
-            "regionGroups": {
-                "CBC": ["CBC-CQ", "CBC-SC"],
-                "CIB": ["CIB东南", "CIB华北", "CIB华南", "CIB苏皖"],
-                "华中": ["华中-湖南", "华中-非湖南"],
-                "NX": ["NX"],
-                "XJ": ["XJ"],
-                "YN": ["YN"],
-                "未识别": ["未识别"],
-            },
+            "regionGroups": REGION_GROUPS,
             "productOrder": [
                 product
                 for product, _ in sorted(product_totals.items(), key=lambda item: item[1], reverse=True)
@@ -897,6 +975,7 @@ def write_logic_doc(data: dict[str, Any]) -> None:
 | 活动折扣率 | `1 - 促销费 / 活动 GMV` | `1 - 促销费 / 活动 GMV` |
 | 目标 GMV | `目标GMV.xlsx` 按平台+年月匹配 | `目标GMV.xlsx` 按平台+年月匹配 |
 | BU 目标与预算 | `分BU预算金额.xlsx` 按平台+年月+区域匹配 | `分BU预算金额.xlsx` 按平台+年月+区域匹配 |
+| 广告曝光费 | `6月目标&费用更新.xlsx` 的 `6月整体费用` 按平台+BU匹配 | `6月目标&费用更新.xlsx` 的 `6月整体费用` 按平台+BU匹配 |
 
 ## 单位说明
 
@@ -955,6 +1034,7 @@ METRIC_EXPORT_KEYS = [
     "activityGmv",
     "subsidy",
     "budget",
+    "advertisingExposureFee",
     "buTarget",
     "targetGmv",
     "actualTmFeeRatio",

@@ -24,6 +24,7 @@ type MetricRow = {
   activityGmv: number;
   subsidy: number;
   budget?: number | null;
+  advertisingExposureFee?: number | null;
   buTarget?: number | null;
   targetGmv?: number | null;
   actualTmFeeRatio?: number | null;
@@ -72,6 +73,7 @@ type Aggregate = {
   activityGmv: number;
   subsidy: number;
   budget: number;
+  advertisingExposureFee: number;
   target: number;
   timeProgress: number | null;
   targetPromoFeeRatio: number | null;
@@ -440,6 +442,7 @@ function aggregateRows(rows: MetricRow[]): Aggregate {
       const planKey = `${row.platformId}|${row.periodId}|${row.region}`;
       if (!uniquePlanKeys.has(planKey)) {
         acc.budget += row.budget || 0;
+        acc.advertisingExposureFee += row.advertisingExposureFee || 0;
         acc.target += row.buTarget || 0;
         uniquePlanKeys.add(planKey);
       }
@@ -454,6 +457,7 @@ function aggregateRows(rows: MetricRow[]): Aggregate {
       activityGmv: 0,
       subsidy: 0,
       budget: 0,
+      advertisingExposureFee: 0,
       target: 0,
       timeProgress: null as number | null,
     },
@@ -2039,6 +2043,10 @@ function Dashboard({ data }: { data: DataShape }) {
         const activityGmvWow = comparisonEnabled ? compareValue(row.activityGmv, rowPrevious.activityGmv) : null;
         const activityGmvYoy = comparisonEnabled ? compareValue(row.activityGmv, rowLastYear.activityGmv) : null;
         const naturalGmv = row.gmv - row.activityGmv;
+        const previousNaturalGmv = rowPrevious.gmv - rowPrevious.activityGmv;
+        const lastYearNaturalGmv = rowLastYear.gmv - rowLastYear.activityGmv;
+        const naturalGmvWow = comparisonEnabled ? compareValue(naturalGmv, previousNaturalGmv) : null;
+        const naturalGmvYoy = comparisonEnabled ? compareValue(naturalGmv, lastYearNaturalGmv) : null;
         const targetGap =
           row.targetAchievement !== null && row.timeProgress !== null
             ? row.targetAchievement - row.timeProgress
@@ -2082,7 +2090,7 @@ function Dashboard({ data }: { data: DataShape }) {
           {
             label: "活动GMV",
             value: formatMoney(row.activityGmv),
-            sub: `环比${formatDelta(activityGmvWow)} 同比${formatDelta(activityGmvYoy)}`,
+            sub: `占比全量GMV ${formatPercent(row.activityShare)} · 环比${formatDelta(activityGmvWow)} 同比${formatDelta(activityGmvYoy)}`,
             status: activityShareStatus(row.activityShare),
             statusTone: row.activityShare !== null && row.activityShare >= 0.7 ? "warn" : "neutral",
             tone: row.activityShare !== null && row.activityShare >= 0.7 ? "warn" : "neutral",
@@ -2090,8 +2098,16 @@ function Dashboard({ data }: { data: DataShape }) {
           {
             label: "自然GMV",
             value: formatMoney(naturalGmv),
-            sub: `占比全量GMV ${formatPercent(safeRatio(naturalGmv, row.gmv))}`,
+            sub: `占比全量GMV ${formatPercent(safeRatio(naturalGmv, row.gmv))} · 环比${formatDelta(naturalGmvWow)} 同比${formatDelta(naturalGmvYoy)}`,
             status: "自然销售",
+            statusTone: "neutral",
+            tone: "neutral",
+          },
+          {
+            label: "广告曝光费",
+            value: formatMoney(row.advertisingExposureFee),
+            sub: `占比全量GMV ${formatPercent(safeRatio(row.advertisingExposureFee, row.gmv))}`,
+            status: "曝光投入",
             statusTone: "neutral",
             tone: "neutral",
           },

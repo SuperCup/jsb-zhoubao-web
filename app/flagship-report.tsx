@@ -611,8 +611,8 @@ export default function FlagshipReport() {
           <SummaryTable rows={visibleData.breakdowns.channels} nameKey="channel" />
         </Panel>
 
-        <Panel title="品牌表">
-          <SummaryTable rows={visibleData.breakdowns.brands} nameKey="brand" />
+        <Panel title="TOP10商品表">
+          <SummaryTable rows={visibleData.breakdowns.products.slice(0, 10)} nameKey="product" />
         </Panel>
 
         <Panel title="TOP10活动表">

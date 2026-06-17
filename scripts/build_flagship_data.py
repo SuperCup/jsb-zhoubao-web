@@ -296,6 +296,22 @@ def total_summary(full: pd.DataFrame, bill: pd.DataFrame) -> dict[str, Any]:
     }
 
 
+def json_records(df: pd.DataFrame, columns: list[str]) -> list[dict[str, Any]]:
+    records: list[dict[str, Any]] = []
+    for _, row in df[columns].iterrows():
+        record: dict[str, Any] = {}
+        for column in columns:
+            value = row.get(column)
+            if pd.isna(value):
+                record[column] = None
+            elif isinstance(value, float):
+                record[column] = round_float(value, 2)
+            else:
+                record[column] = value
+        records.append(record)
+    return records
+
+
 def build() -> dict[str, Any]:
     full_frames: list[pd.DataFrame] = []
     bill_frames: list[pd.DataFrame] = []
@@ -353,6 +369,16 @@ def build() -> dict[str, Any]:
             "brands": aggregate(full, bill, "brand", "brand"),
             "activities": aggregate(full, bill, "activityName", "activityName", sort_key="activityGmv"),
             "products": aggregate(full, bill, "product", "product"),
+        },
+        "records": {
+            "full": json_records(
+                full,
+                ["date", "region", "channel", "brand", "product", "gmv", "quantity", "orders", "users"],
+            ),
+            "bill": json_records(
+                bill,
+                ["date", "region", "channel", "brand", "product", "activityName", "activityGmv", "subsidy", "orderId"],
+            ),
         },
     }
     OUTPUT_JSON.write_text(json.dumps(data, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 declare const __DATA_CACHE_VERSION__: string | undefined;
 
@@ -26,6 +26,30 @@ type Breakdown = Summary & {
   brand?: string;
   product?: string;
   activityName?: string;
+};
+
+type FullRecord = {
+  date: string;
+  region: string;
+  channel: string;
+  brand: string;
+  product: string;
+  gmv?: number | null;
+  quantity?: number | null;
+  orders?: number | null;
+  users?: number | null;
+};
+
+type BillRecord = {
+  date: string;
+  region: string;
+  channel: string;
+  brand: string;
+  product: string;
+  activityName: string;
+  activityGmv?: number | null;
+  subsidy?: number | null;
+  orderId?: string | null;
 };
 
 type FlagshipData = {
@@ -63,6 +87,10 @@ type FlagshipData = {
     activities: Breakdown[];
     products: Breakdown[];
   };
+  records?: {
+    full: FullRecord[];
+    bill: BillRecord[];
+  };
 };
 
 const DATA_CACHE_VERSION =
@@ -97,11 +125,157 @@ function isRealNumber(value: number | null | undefined): value is number {
   return typeof value === "number" && Number.isFinite(value);
 }
 
+function numeric(value: number | null | undefined): number {
+  return isRealNumber(value) ? value : 0;
+}
+
+function roundMetric(value: number | null | undefined, digits = 4): number | null {
+  if (!isRealNumber(value)) return null;
+  return Number(value.toFixed(digits));
+}
+
+function safeDiv(numerator: number, denominator: number): number | null {
+  if (!denominator) return null;
+  return numerator / denominator;
+}
+
+function parseIsoDate(value: string): Date {
+  const [year, month, day] = value.split("-").map(Number);
+  return new Date(year, month - 1, day);
+}
+
+function addDays(date: Date, days: number): Date {
+  return new Date(date.getTime() + days * 24 * 60 * 60 * 1000);
+}
+
+function dateOffset(start: string, value: string): number {
+  const diff = parseIsoDate(value).getTime() - parseIsoDate(start).getTime();
+  return Math.round(diff / (24 * 60 * 60 * 1000));
+}
+
+function formatMonthDay(date: Date): string {
+  return `${date.getMonth() + 1}月${date.getDate()}日`;
+}
+
+function formatRangeLabel(start: string, startOffset: number, endOffset: number): string {
+  const startDate = addDays(parseIsoDate(start), startOffset);
+  const endDate = addDays(parseIsoDate(start), endOffset);
+  if (startOffset === endOffset) return formatMonthDay(startDate);
+  if (startDate.getMonth() === endDate.getMonth()) {
+    return `${startDate.getMonth() + 1}月${startDate.getDate()}-${endDate.getDate()}日`;
+  }
+  return `${formatMonthDay(startDate)}-${formatMonthDay(endDate)}`;
+}
+
 function formatMoney(value: number | null | undefined): string {
   if (!isRealNumber(value)) return "";
   if (Math.abs(value) >= 100000000) return `${(value / 100000000).toFixed(2)}亿`;
   if (Math.abs(value) >= 10000) return `${(value / 10000).toFixed(1)}万`;
   return value.toLocaleString("zh-CN", { maximumFractionDigits: 0 });
+}
+
+function buildDateOptions(data: FlagshipData) {
+  const start = parseIsoDate(data.metadata.period.start);
+  const endOffset = dateOffset(data.metadata.period.start, data.metadata.period.end);
+  return Array.from({ length: endOffset + 1 }, (_, offset) => ({
+    offset,
+    label: formatMonthDay(addDays(start, offset)),
+  }));
+}
+
+function regionOptions(data: FlagshipData): string[] {
+  const values = new Set<string>();
+  data.records?.full.forEach((row) => values.add(row.region));
+  data.records?.bill.forEach((row) => values.add(row.region));
+  return [...values].filter(Boolean).sort((a, b) => a.localeCompare(b, "zh-CN"));
+}
+
+function matchesFilter(
+  row: { date: string; region: string },
+  data: FlagshipData,
+  startOffset: number,
+  endOffset: number,
+  region: string,
+) {
+  const offset = dateOffset(data.metadata.period.start, row.date);
+  const dateMatched = offset >= startOffset && offset <= endOffset;
+  const regionMatched = region === "all" || row.region === region;
+  return dateMatched && regionMatched;
+}
+
+function summarizeRows(full: FullRecord[], bill: BillRecord[]): Summary {
+  const hasFullRows = full.length > 0;
+  const gmv = full.reduce((sum, row) => sum + numeric(row.gmv), 0);
+  const activityGmv = bill.reduce((sum, row) => sum + numeric(row.activityGmv), 0);
+  const subsidy = bill.reduce((sum, row) => sum + numeric(row.subsidy), 0);
+  const orderIds = new Set(bill.map((row) => row.orderId?.trim()).filter(Boolean));
+  return {
+    gmv: hasFullRows ? roundMetric(gmv, 2) : null,
+    quantity: hasFullRows ? roundMetric(full.reduce((sum, row) => sum + numeric(row.quantity), 0), 2) : null,
+    orders: hasFullRows ? roundMetric(full.reduce((sum, row) => sum + numeric(row.orders), 0), 2) : null,
+    users: hasFullRows ? roundMetric(full.reduce((sum, row) => sum + numeric(row.users), 0), 2) : null,
+    activityGmv: roundMetric(activityGmv, 2),
+    subsidy: roundMetric(subsidy, 2),
+    couponCount: orderIds.size,
+    naturalGmv: hasFullRows ? roundMetric(gmv - activityGmv, 2) : null,
+    activityShare: hasFullRows ? roundMetric(safeDiv(activityGmv, gmv)) : null,
+    promoFeeRatio: hasFullRows ? roundMetric(safeDiv(subsidy, gmv)) : null,
+    activityRoi: roundMetric(safeDiv(activityGmv, subsidy)),
+  };
+}
+
+function aggregateFilteredRows(
+  full: FullRecord[],
+  bill: BillRecord[],
+  fullKey: keyof FullRecord,
+  billKey: keyof BillRecord,
+  outputKey: keyof Breakdown,
+  sortKey: keyof Summary = "gmv",
+): Breakdown[] {
+  const fullMap = new Map<string, FullRecord[]>();
+  const billMap = new Map<string, BillRecord[]>();
+  full.forEach((row) => {
+    const key = String(row[fullKey] ?? "").trim();
+    if (!key) return;
+    fullMap.set(key, [...(fullMap.get(key) ?? []), row]);
+  });
+  bill.forEach((row) => {
+    const key = String(row[billKey] ?? "").trim();
+    if (!key) return;
+    billMap.set(key, [...(billMap.get(key) ?? []), row]);
+  });
+  const keys = new Set([...fullMap.keys(), ...billMap.keys()]);
+  const rows = [...keys].map((key) => ({
+    [outputKey]: key,
+    ...summarizeRows(fullMap.get(key) ?? [], billMap.get(key) ?? []),
+  })) as Breakdown[];
+  rows.sort((a, b) => numeric(b[sortKey]) - numeric(a[sortKey]));
+  return rows;
+}
+
+function buildFilteredData(
+  data: FlagshipData,
+  startOffset: number,
+  endOffset: number,
+  region: string,
+): Pick<FlagshipData, "summary" | "breakdowns"> {
+  const full = (data.records?.full ?? []).filter((row) => matchesFilter(row, data, startOffset, endOffset, region));
+  const bill = (data.records?.bill ?? []).filter((row) => matchesFilter(row, data, startOffset, endOffset, region));
+  if (!data.records) {
+    return { summary: data.summary, breakdowns: data.breakdowns };
+  }
+  return {
+    summary: summarizeRows(full, bill),
+    breakdowns: {
+      platforms: [],
+      regions: aggregateFilteredRows(full, bill, "region", "region", "region"),
+      channels: aggregateFilteredRows(full, bill, "channel", "channel", "channel"),
+      merchants: [],
+      brands: aggregateFilteredRows(full, bill, "brand", "brand", "brand"),
+      activities: aggregateFilteredRows([], bill, "product", "activityName", "activityName", "activityGmv"),
+      products: aggregateFilteredRows(full, bill, "product", "product", "product"),
+    },
+  };
 }
 
 function formatNumber(value: number | null | undefined): string {
@@ -231,6 +405,9 @@ function DetailLinks({ data }: { data: FlagshipData }) {
 export default function FlagshipReport() {
   const [data, setData] = useState<FlagshipData | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [dateStartOffset, setDateStartOffset] = useState(0);
+  const [dateEndOffset, setDateEndOffset] = useState<number | null>(null);
+  const [region, setRegion] = useState("all");
 
   useEffect(() => {
     let cancelled = false;
@@ -245,6 +422,21 @@ export default function FlagshipReport() {
       cancelled = true;
     };
   }, []);
+
+  const dateOptions = useMemo(() => (data ? buildDateOptions(data) : []), [data]);
+  const maxDateOffset = dateOptions[dateOptions.length - 1]?.offset ?? 0;
+  const selectedStartOffset = Math.min(dateStartOffset, maxDateOffset);
+  const selectedEndOffset = Math.min(Math.max(dateEndOffset ?? maxDateOffset, selectedStartOffset), maxDateOffset);
+  const selectedDateLabel = data
+    ? formatRangeLabel(data.metadata.period.start, selectedStartOffset, selectedEndOffset)
+    : "";
+  const regions = useMemo(() => (data ? regionOptions(data) : []), [data]);
+  const selectedRegionLabel = region === "all" ? "全国/全区域" : region;
+  const visibleData = useMemo(
+    () => (data ? buildFilteredData(data, selectedStartOffset, selectedEndOffset, region) : null),
+    [data, selectedStartOffset, selectedEndOffset, region],
+  );
+  const notes = data && visibleData ? buildNotes({ ...data, ...visibleData }) : [];
 
   if (loadError) {
     return (
@@ -268,7 +460,10 @@ export default function FlagshipReport() {
     );
   }
 
-  const notes = buildNotes(data);
+  if (!visibleData) {
+    return null;
+  }
+
   const generated = generatedLabel(data.metadata.generatedAt);
 
   return (
@@ -280,23 +475,82 @@ export default function FlagshipReport() {
           <p className="header-subtitle">淘宝闪购｜{data.metadata.period.label}</p>
           <div className="header-meta">
             <span>酒小二 / 惠宜选 / 永辉 / 西菲狸</span>
-            <span>6月1-14日</span>
+            <span>{selectedDateLabel}</span>
+            <span>{selectedRegionLabel}</span>
             <span>数据生成 {generated}</span>
           </div>
         </div>
       </header>
 
-      <section className="view-context">{data.metadata.definition}</section>
+      <section className="control-band flagship-controls">
+        <div className="control-group compact date-range-control">
+          <label>日期段</label>
+          <div className="range-selects">
+            <div className="range-select-field">
+              <span>开始</span>
+              <select
+                aria-label="开始日期"
+                value={selectedStartOffset}
+                onChange={(event) => {
+                  const nextStart = Number(event.target.value);
+                  setDateStartOffset(nextStart);
+                  if (nextStart > selectedEndOffset) setDateEndOffset(nextStart);
+                }}
+              >
+                {dateOptions.map((item) => (
+                  <option value={item.offset} key={`start-${item.offset}`}>
+                    {item.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <span className="range-separator">至</span>
+            <div className="range-select-field">
+              <span>结束</span>
+              <select
+                aria-label="结束日期"
+                value={selectedEndOffset}
+                onChange={(event) => {
+                  const nextEnd = Number(event.target.value);
+                  setDateEndOffset(nextEnd);
+                  if (nextEnd < selectedStartOffset) setDateStartOffset(nextEnd);
+                }}
+              >
+                {dateOptions.map((item) => (
+                  <option value={item.offset} key={`end-${item.offset}`}>
+                    {item.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+        </div>
+        <div className="control-group compact">
+          <label htmlFor="flagship-region-select">区域</label>
+          <select id="flagship-region-select" value={region} onChange={(event) => setRegion(event.target.value)}>
+            <option value="all">全国/全区域</option>
+            {regions.map((item) => (
+              <option value={item} key={item}>
+                {item}
+              </option>
+            ))}
+          </select>
+        </div>
+      </section>
+
+      <section className="view-context">
+        当前视角：淘宝闪购｜{selectedRegionLabel}｜{selectedDateLabel}。{data.metadata.definition}
+      </section>
 
       <section className="core-matrix">
         <div className="metric-scope-block merged">
           <div className="metric-scope-title">官旗经营总览</div>
           <div className="core-metric-grid">
-            <MetricCard label="全量GMV" value={formatMoney(data.summary.gmv)} sub="目标达成率 " />
-            <MetricCard label="活动GMV" value={formatMoney(data.summary.activityGmv)} sub={`占比 ${formatPercent(data.summary.activityShare)}`} />
-            <MetricCard label="自然GMV" value={formatMoney(data.summary.naturalGmv)} sub="全量GMV - 活动GMV" />
-            <MetricCard label="促销费" value={formatMoney(data.summary.subsidy)} sub={`费比 ${formatPercent(data.summary.promoFeeRatio)}`} />
-            <MetricCard label="活动ROI" value={formatRoi(data.summary.activityRoi)} sub={`核券量 ${formatNumber(data.summary.couponCount)}`} />
+            <MetricCard label="全量GMV" value={formatMoney(visibleData.summary.gmv)} sub="目标达成率 " />
+            <MetricCard label="活动GMV" value={formatMoney(visibleData.summary.activityGmv)} sub={`占比 ${formatPercent(visibleData.summary.activityShare)}`} />
+            <MetricCard label="自然GMV" value={formatMoney(visibleData.summary.naturalGmv)} sub="全量GMV - 活动GMV" />
+            <MetricCard label="促销费" value={formatMoney(visibleData.summary.subsidy)} sub={`费比 ${formatPercent(visibleData.summary.promoFeeRatio)}`} />
+            <MetricCard label="活动ROI" value={formatRoi(visibleData.summary.activityRoi)} sub={`核券量 ${formatNumber(visibleData.summary.couponCount)}`} />
           </div>
         </div>
       </section>
@@ -335,14 +589,14 @@ export default function FlagshipReport() {
               </thead>
               <tbody>
                 <tr>
-                  <td>{data.metadata.period.label}</td>
-                  <td>{formatMoney(data.summary.gmv)}</td>
-                  <td>{formatMoney(data.summary.activityGmv)}</td>
-                  <td>{formatMoney(data.summary.naturalGmv)}</td>
-                  <td>{formatPercent(data.summary.activityShare)}</td>
-                  <td>{formatMoney(data.summary.subsidy)}</td>
-                  <td>{formatPercent(data.summary.promoFeeRatio)}</td>
-                  <td>{formatRoi(data.summary.activityRoi)}</td>
+                  <td>{selectedDateLabel}</td>
+                  <td>{formatMoney(visibleData.summary.gmv)}</td>
+                  <td>{formatMoney(visibleData.summary.activityGmv)}</td>
+                  <td>{formatMoney(visibleData.summary.naturalGmv)}</td>
+                  <td>{formatPercent(visibleData.summary.activityShare)}</td>
+                  <td>{formatMoney(visibleData.summary.subsidy)}</td>
+                  <td>{formatPercent(visibleData.summary.promoFeeRatio)}</td>
+                  <td>{formatRoi(visibleData.summary.activityRoi)}</td>
                 </tr>
               </tbody>
             </table>
@@ -350,19 +604,19 @@ export default function FlagshipReport() {
         </Panel>
 
         <Panel title="区域表">
-          <SummaryTable rows={data.breakdowns.regions} nameKey="region" />
+          <SummaryTable rows={visibleData.breakdowns.regions} nameKey="region" />
         </Panel>
 
         <Panel title="渠道表">
-          <SummaryTable rows={data.breakdowns.channels} nameKey="channel" />
+          <SummaryTable rows={visibleData.breakdowns.channels} nameKey="channel" />
         </Panel>
 
         <Panel title="品牌表">
-          <SummaryTable rows={data.breakdowns.brands} nameKey="brand" />
+          <SummaryTable rows={visibleData.breakdowns.brands} nameKey="brand" />
         </Panel>
 
         <Panel title="TOP10活动表">
-          <SummaryTable rows={data.breakdowns.activities} nameKey="activityName" />
+          <SummaryTable rows={visibleData.breakdowns.activities} nameKey="activityName" />
         </Panel>
 
         <Panel title="官旗数据明细">

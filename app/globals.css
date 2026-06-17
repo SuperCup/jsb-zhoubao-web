@@ -995,6 +995,33 @@ select {
   font-weight: 800;
 }
 
+.empty-note {
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.7;
+}
+
+.download-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.download-links a {
+  border: 1px solid #9ccdb9;
+  border-radius: 8px;
+  background: var(--green-soft);
+  padding: 9px 12px;
+  color: #0e6046;
+  font-size: 13px;
+  font-weight: 850;
+  text-decoration: none;
+}
+
+.flagship-report .overview-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
 .metric-table {
   width: 100%;
   min-width: 980px;

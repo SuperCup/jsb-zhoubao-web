@@ -7,7 +7,7 @@
   },
   "scripts": {
     "dev": "vinext dev",
-    "build:data": "python3 scripts/build_dashboard_data.py",
+    "build:data": "python3 scripts/build_dashboard_data.py && python3 scripts/build_flagship_data.py",
     "build": "vinext build",
     "build:public": "vite build --config vite.public.config.ts",
     "build:github": "PUBLIC_BASE_PATH=/jsb-zhoubao-web/ npm run build:public",

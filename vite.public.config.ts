@@ -1,4 +1,5 @@
 import react from "@vitejs/plugin-react";
+import { resolve } from "node:path";
 import { defineConfig } from "vite";
 
 const dataCacheVersion =
@@ -17,5 +18,11 @@ export default defineConfig({
   build: {
     outDir: "../public-dist",
     emptyOutDir: true,
+    rollupOptions: {
+      input: {
+        main: resolve(__dirname, "public-spa/index.html"),
+        flagship: resolve(__dirname, "public-spa/flagship/index.html"),
+      },
+    },
   },
 });

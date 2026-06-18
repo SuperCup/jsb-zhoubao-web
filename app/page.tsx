@@ -835,6 +835,184 @@ function activityShareStatus(value: number | null | undefined): CoreMetric["stat
   return "正常";
 }
 
+type TrendLineDef = {
+  key: string;
+  name: string;
+  color: string;
+};
+
+function TrendLineChart({
+  title,
+  rows,
+  lines,
+  valueFormatter = formatMoney,
+  expanded = false,
+  onExpand,
+}: {
+  title: string;
+  rows: Array<{ label: string } & Record<string, number | null | undefined>>;
+  lines: TrendLineDef[];
+  valueFormatter?: (value: number | null | undefined) => string;
+  expanded?: boolean;
+  onExpand?: () => void;
+}) {
+  const [hiddenLines, setHiddenLines] = useState<Set<string>>(new Set());
+  const toggleLine = (key: string) => {
+    setHiddenLines((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+
+  const chartRows = rows;
+  const width = expanded ? Math.max(1000, chartRows.length * 58 + 120) : 820;
+  const height = expanded ? 460 : 380;
+  const left = 64;
+  const right = 16;
+  const top = 44;
+  const bottom = expanded ? 100 : 70;
+  const plotWidth = width - left - right;
+  const plotHeight = height - top - bottom;
+  const plotBottom = top + plotHeight;
+  const step = plotWidth / Math.max(chartRows.length - 1, 1);
+
+  const visibleLines = lines.filter((l) => !hiddenLines.has(l.key));
+  const allValues = visibleLines.flatMap((l) => chartRows.flatMap((row) => [row[l.key]]));
+  const maxVal = niceAmountMax(allValues);
+
+  const xFor = (index: number) => (chartRows.length === 1 ? left + plotWidth / 2 : left + step * index);
+  const yFor = (value: number) => plotBottom - (Math.max(value, 0) / maxVal) * plotHeight;
+
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLElement>) => {
+    if (!onExpand) return;
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      onExpand();
+    }
+  };
+
+  return (
+    <article
+      className={classNames("summary-chart-card", onExpand && "clickable-chart", expanded && "expanded-chart")}
+      onClick={onExpand}
+      onKeyDown={handleKeyDown}
+      role={onExpand ? "button" : undefined}
+      tabIndex={onExpand ? 0 : undefined}
+    >
+      <div className="summary-chart-heading">
+        <h3>{title}</h3>
+        <div className="chart-heading-tools">
+          <div className="chart-legend" style={{ cursor: "pointer" }}>
+            {lines.map((l) => (
+              <span
+                key={l.key}
+                className={classNames("legend-trend", hiddenLines.has(l.key) && "legend-hidden")}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  toggleLine(l.key);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    toggleLine(l.key);
+                  }
+                }}
+                role="switch"
+                aria-checked={!hiddenLines.has(l.key)}
+                tabIndex={0}
+                style={{ ["--trend-color" as string]: l.color }}
+              >
+                {l.name}
+              </span>
+            ))}
+          </div>
+          {onExpand ? <span className="chart-expand-hint">点击放大</span> : null}
+        </div>
+      </div>
+      <svg
+        className="summary-chart"
+        viewBox={`0 0 ${width} ${height}`}
+        role="img"
+        aria-label={title}
+        style={expanded ? { minWidth: width } : undefined}
+      >
+        {/* grid lines and Y-axis labels */}
+        {[0, 0.25, 0.5, 0.75, 1].map((ratio) => {
+          const y = plotBottom - ratio * plotHeight;
+          return (
+            <g key={ratio}>
+              <line className="chart-grid-line" x1={left} x2={width - right} y1={y} y2={y} />
+              <text className="chart-axis-label" x={left - 8} y={y + 4} textAnchor="end">
+                {valueFormatter(maxVal * ratio)}
+              </text>
+            </g>
+          );
+        })}
+        {/* X-axis labels — show every Nth day to avoid crowding */}
+        {chartRows.map((row, index) => {
+          const showLabel = chartRows.length <= 10 || index % Math.ceil(chartRows.length / 10) === 0;
+          if (!showLabel) return null;
+          return (
+            <text
+              key={`x-${index}`}
+              className="chart-axis-label"
+              x={xFor(index)}
+              y={plotBottom + 18}
+              textAnchor="middle"
+            >
+              {row.label}
+            </text>
+          );
+        })}
+        {/* zero line */}
+        <line className="chart-grid-line" x1={left} x2={width - right} y1={plotBottom} y2={plotBottom} />
+        {/* line series */}
+        {lines.map((l) => {
+          if (hiddenLines.has(l.key)) return null;
+          const points = chartRows
+            .map((row, index) => {
+              const value = row[l.key];
+              return finiteNumber(value) ? `${xFor(index)},${yFor(value)}` : null;
+            })
+            .filter(Boolean)
+            .join(" ");
+          if (!points) return null;
+          return (
+            <g key={l.key}>
+              <polyline
+                className="chart-line"
+                points={points}
+                fill="none"
+                stroke={l.color}
+                strokeWidth="2"
+                strokeLinejoin="round"
+              />
+              {chartRows.map((row, index) => {
+                const value = row[l.key];
+                if (!finiteNumber(value)) return null;
+                return (
+                  <circle
+                    key={`${l.key}-${index}`}
+                    cx={xFor(index)}
+                    cy={yFor(value)}
+                    r="4"
+                    fill={l.color}
+                    stroke="#fff"
+                    strokeWidth="1.5"
+                  />
+                );
+              })}
+            </g>
+          );
+        })}
+      </svg>
+    </article>
+  );
+}
+
 function ComboBarLineChart({
   title,
   rows,
@@ -2116,6 +2294,43 @@ function Dashboard({ data }: { data: DataShape }) {
       }),
     [comparisonEnabled, data, period, effectiveProduct, region, scopeOptions, includeTargetBudget, selectedDateRange],
   );
+
+  const dailyTrendRows = useMemo(() => {
+    const groups = coreProductGroups(data);
+    const selectedLeavesSet = new Set(leavesFor(data, region));
+    const platformSet = new Set(platformIds(data, PLATFORM_ALL));
+    const filtered = metricRowsForProduct(data, effectiveProduct).filter(
+      (row) =>
+        row.periodId === period &&
+        platformSet.has(row.platformId) &&
+        selectedLeavesSet.has(row.region) &&
+        rowMatchesDateRange(data, row, selectedDateRange) &&
+        matchesCoreProduct(row.product, effectiveProduct, groups),
+    );
+    const dailyMap = new Map<string, { gmv: number; activityGmv: number; subsidy: number }>();
+    filtered.forEach((row) => {
+      if (!row.date) return;
+      const entry = dailyMap.get(row.date) || { gmv: 0, activityGmv: 0, subsidy: 0 };
+      entry.gmv += row.gmv || 0;
+      entry.activityGmv += row.activityGmv || 0;
+      entry.subsidy += row.subsidy || 0;
+      dailyMap.set(row.date, entry);
+    });
+    return [...dailyMap.entries()]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([date, vals]) => {
+        const d = parseIsoDate(date);
+        const dayLabel = `${d.getUTCMonth() + 1}/${d.getUTCDate()}`;
+        return {
+          label: dayLabel,
+          gmv: vals.gmv,
+          activityGmv: vals.activityGmv,
+          organicGmv: vals.gmv - vals.activityGmv,
+          subsidy: vals.subsidy,
+        };
+      });
+  }, [data, period, effectiveProduct, region, selectedDateRange]);
+
   const summaryPanels = useMemo(
     () =>
       scopeOptions.map((scope) => {
@@ -2419,6 +2634,34 @@ function Dashboard({ data }: { data: DataShape }) {
 
       <section className="summary-section">
         <Panel title="Summary">
+          <TrendLineChart
+            title={`${selectedDateLabel} 日趋势`}
+            rows={dailyTrendRows}
+            lines={[
+              { key: "gmv", name: "全量GMV", color: "#4d8dff" },
+              { key: "activityGmv", name: "活动GMV", color: "#43d2dd" },
+              { key: "organicGmv", name: "自然GMV", color: "#61c7a2" },
+              { key: "subsidy", name: "促销费", color: "#ffb45f" },
+            ]}
+            onExpand={() =>
+              setExpandedChart({
+                title: `${selectedDateLabel} 日趋势`,
+                content: (
+                  <TrendLineChart
+                    title={`${selectedDateLabel} 日趋势`}
+                    rows={dailyTrendRows}
+                    lines={[
+                      { key: "gmv", name: "全量GMV", color: "#4d8dff" },
+                      { key: "activityGmv", name: "活动GMV", color: "#43d2dd" },
+                      { key: "organicGmv", name: "自然GMV", color: "#61c7a2" },
+                      { key: "subsidy", name: "促销费", color: "#ffb45f" },
+                    ]}
+                    expanded
+                  />
+                ),
+              })
+            }
+          />
           <div className="summary-scope-stack">
             {summaryPanels.map((scope) => {
               const regionGmvTitle = includeTargetBudget

@@ -794,6 +794,22 @@ select {
   background: var(--purple);
 }
 
+.chart-legend .legend-trend {
+  cursor: pointer;
+  user-select: none;
+}
+
+.chart-legend .legend-trend::before {
+  height: 3px;
+  border-radius: 3px;
+  background: var(--trend-color, var(--blue));
+}
+
+.chart-legend .legend-hidden {
+  opacity: 0.35;
+  text-decoration: line-through;
+}
+
 .summary-chart {
   display: block;
   width: 100%;

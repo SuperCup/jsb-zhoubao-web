@@ -3244,7 +3244,7 @@ function Dashboard({ data }: { data: DataShape }) {
                 </tr>
               </thead>
               <tbody>
-                {channels.map((row) => {
+                {channels.filter((row) => row.gmv > 0).map((row) => {
                   const prev = findNamed(previousChannels, row.name);
                   const last = findNamed(lastYearChannels, row.name);
                   return (

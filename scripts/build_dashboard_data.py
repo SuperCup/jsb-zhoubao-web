@@ -16,58 +16,59 @@ WORKSPACE = Path(__file__).resolve().parents[1]
 SOURCE_DIR = Path(
     os.environ.get(
         "SOURCE_DIR",
-        "/Users/luffy/Desktop/Project/A_即时零售交付新路线探索/嘉士伯周报数据源",
+        WORKSPACE / "嘉士伯周报看板调用数据",
     )
 )
 OUTPUT_JSON = Path(
     os.environ.get("OUTPUT_JSON", WORKSPACE / "public" / "data" / "dashboard-data.json")
 )
 LOGIC_DOC = Path(os.environ.get("LOGIC_DOC", WORKSPACE / "docs" / "取数逻辑说明.md"))
-EXPENSE_UPDATE_FILE = SOURCE_DIR / "6月目标&费用更新.xlsx"
+EXPENSE_UPDATE_FILE = SOURCE_DIR / "6月分BU分渠道目标GMV&曝光费更新v1.xlsx"
+ONLINE_WINE_MATCH_FILE = SOURCE_DIR / "线上酒专营匹配表.xlsx"
 
-CURRENT_PERIOD_ID = "0601-0614"
-PREVIOUS_PERIOD_ID = "0501-0514"
-LAST_YEAR_PERIOD_ID = "25年0601-0614"
+CURRENT_PERIOD_ID = "0601-0621"
+PREVIOUS_PERIOD_ID = "0501-0521"
+LAST_YEAR_PERIOD_ID = "25年0601-0621"
 
 
 PERIODS = [
     {
         "id": PREVIOUS_PERIOD_ID,
-        "label": "MTD 5.1-5.14",
-        "shortLabel": "5.1-5.14",
+        "label": "MTD 5.1-5.21",
+        "shortLabel": "5.1-5.21",
         "kind": "previous",
         "start": "2026-05-01",
-        "end": "2026-05-14",
+        "end": "2026-05-21",
         "monthKey": 202605,
         "monthLabel": "2026年5月",
-        "sourceIds": ["0501-0507", "0508-0514"],
+        "sourceIds": ["0501-0507", "0508-0514", "0515-0521"],
     },
     {
         "id": CURRENT_PERIOD_ID,
-        "label": "MTD 6.1-6.14",
-        "shortLabel": "6.1-6.14",
+        "label": "MTD 6.1-6.21",
+        "shortLabel": "6.1-6.21",
         "kind": "current",
         "start": "2026-06-01",
-        "end": "2026-06-14",
+        "end": "2026-06-21",
         "monthKey": 202606,
         "monthLabel": "2026年6月",
-        "sourceIds": ["0601-0607", "0608-0614"],
+        "sourceIds": ["0601-0607", "0608-0614", "0615-0621"],
         "sourceOverrides": {
             "jd": {
-                "账单数据明细-京东到家.csv": ["0601-0607", "0608-0612", "0613-0614"],
+                "账单数据明细-京东到家.csv": ["0601-0607", "0608-0612", "0613-0614", "0615-0620"],
             },
         },
     },
     {
         "id": LAST_YEAR_PERIOD_ID,
-        "label": "去年同期 6.1-6.14",
-        "shortLabel": "2025 6.1-6.14",
+        "label": "去年同期 6.1-6.21",
+        "shortLabel": "2025 6.1-6.21",
         "kind": "last_year",
         "start": "2025-06-01",
-        "end": "2025-06-14",
+        "end": "2025-06-21",
         "monthKey": 202506,
         "monthLabel": "2025年6月",
-        "sourceIds": ["25年0601-0607", "25年0608-0614"],
+        "sourceIds": ["25年0601-0607", "25年0608-0614", "25年0615-0621"],
     },
 ]
 
@@ -153,10 +154,23 @@ CORE_PRODUCT_GROUPS = [
 ]
 
 CHANNEL_ORDER = ["线上酒专店", "仓店", "其他"]
+CHANNEL_DETAIL_COL = "渠道表_清洗渠道"
 CHANNEL_ALIASES = {
     "中仓店": "仓店",
     "闪电仓": "仓店",
 }
+CHANNEL_DETAIL_ALIASES = {
+    "中仓店": "仓店",
+    "闪电仓": "仓店",
+    "仓店": "仓店",
+    "其他": "其他",
+    "其它": "其他",
+    "散店-超市": "其他",
+    "散店-食品食材": "其他",
+    "散店-便利店": "其他",
+    "食品食材": "其他",
+}
+WAREHOUSE_CHANNELS = {"仓店", "中仓店", "闪电仓"}
 WUSU_MERCHANT_NAME = "乌苏啤酒/WUSU"
 SHANLIDA_CHANNEL_NAME = "闪力达"
 TAOBAO_WAREHOUSE_BILL_MERCHANTS = {
@@ -224,22 +238,19 @@ def apply_expense_update(
     if not EXPENSE_UPDATE_FILE.exists():
         return
 
-    raw = pd.read_excel(EXPENSE_UPDATE_FILE, sheet_name="6月整体费用", header=None)
-    platform_label = ""
+    raw = pd.read_excel(EXPENSE_UPDATE_FILE, sheet_name="6月曝光费", header=None)
+    platform_columns: dict[int, str] = {}
     for column_index in range(1, raw.shape[1]):
-        header_platform = raw.iat[0, column_index]
-        if pd.notna(header_platform):
-            platform_label = str(header_platform).strip()
-        metric_name = str(raw.iat[1, column_index]).strip()
-        if metric_name != "广告曝光费":
-            continue
+        platform_label = str(raw.iat[0, column_index]).strip()
         platform = EXPENSE_PLATFORM_MAP.get(platform_label)
-        if not platform:
+        if platform:
+            platform_columns[column_index] = platform
+
+    for row_index in range(2, raw.shape[0]):
+        region = str(raw.iat[row_index, 0]).strip()
+        if region in {"", "nan", "None", "汇总", "总计"}:
             continue
-        for row_index in range(2, raw.shape[0]):
-            region = str(raw.iat[row_index, 0]).strip()
-            if region in {"", "nan", "None", "汇总", "总计"}:
-                continue
+        for column_index, platform in platform_columns.items():
             assign_group_metric(
                 bu_budget,
                 platform,
@@ -248,6 +259,54 @@ def apply_expense_update(
                 "advertisingExposureFee",
                 clean_number(raw.iat[row_index, column_index]),
             )
+
+
+def load_channel_targets() -> dict[tuple[str, int, str, str], float]:
+    if not EXPENSE_UPDATE_FILE.exists():
+        return {}
+    raw = pd.read_excel(EXPENSE_UPDATE_FILE, sheet_name="6月分渠道分BU的目标GMV", header=1)
+    target_columns = {
+        "仓店": "6月仓店目标GMV",
+        "线上酒专店": "6月线上酒专店目标GMV",
+        "其他": "6月其他目标GMV",
+    }
+    channel_targets: dict[tuple[str, int, str, str], float] = {}
+    for _, row in raw.iterrows():
+        platform = EXPENSE_PLATFORM_MAP.get(str(row.get("平台")).strip())
+        region = str(row.get("BU")).strip()
+        if not platform or region in {"", "nan", "None"}:
+            continue
+        for channel, column in target_columns.items():
+            value = clean_number(row.get(column))
+            if value:
+                assign_channel_target(channel_targets, platform, 202606, region, channel, value)
+    return channel_targets
+
+
+def assign_channel_target(
+    channel_targets: dict[tuple[str, int, str, str], float],
+    platform: str,
+    month_key: int,
+    region: str,
+    channel: str,
+    value: float,
+) -> None:
+    if region in REGION_PARENT:
+        channel_targets[(platform, month_key, region, channel)] = value
+        return
+
+    children = REGION_GROUPS.get(region)
+    if not children:
+        return
+
+    allocated_total = 0.0
+    for index, child in enumerate(children):
+        if index == len(children) - 1:
+            allocated = value - allocated_total
+        else:
+            allocated = value / len(children)
+            allocated_total += allocated
+        channel_targets[(platform, month_key, child, channel)] = allocated
 
 
 def safe_div(numerator: float, denominator: float) -> float | None:
@@ -268,21 +327,39 @@ def round_float(value: Any, digits: int = 4) -> float | None:
     return round(number, digits)
 
 
+def load_online_wine_merchants() -> set[str]:
+    if not ONLINE_WINE_MATCH_FILE.exists():
+        return set()
+    df = pd.read_excel(ONLINE_WINE_MATCH_FILE)
+    if "清洗_商户" not in df.columns:
+        return set()
+    return {
+        str(value).strip()
+        for value in df["清洗_商户"].dropna()
+        if str(value).strip() and str(value).strip().lower() != "nan"
+    }
+
+
+ONLINE_WINE_MERCHANTS = load_online_wine_merchants()
+
+
 def normalize_channel_fields(df: pd.DataFrame) -> pd.DataFrame:
     if "清洗_渠道" not in df.columns:
         return df
-    if {"渠道名称", "清洗_商户"}.issubset(df.columns):
-        shanlida = df["渠道名称"].astype(str).str.strip().eq(SHANLIDA_CHANNEL_NAME)
-        df.loc[shanlida, "清洗_商户"] = SHANLIDA_CHANNEL_NAME
-        df.loc[shanlida, "清洗_渠道"] = "闪电仓"
+    raw_channel = df["清洗_渠道"].fillna("").astype(str).str.strip()
+    raw_channel = raw_channel.mask(raw_channel.str.lower().isin({"", "nan", "none", "未识别"}), "其他")
+    raw_channel = raw_channel.replace(CHANNEL_DETAIL_ALIASES)
+    df[CHANNEL_DETAIL_COL] = raw_channel
     if {"饿了么订单号", "清洗_商户"}.issubset(df.columns):
         warehouse_bill_merchants = df["清洗_商户"].astype(str).str.strip().isin(TAOBAO_WAREHOUSE_BILL_MERCHANTS)
         df.loc[warehouse_bill_merchants, "清洗_渠道"] = "闪电仓"
-    channel = df["清洗_渠道"].replace(CHANNEL_ALIASES)
-    if "清洗_商户" in df.columns:
-        merchant = df["清洗_商户"]
-        channel = channel.mask(merchant.eq(WUSU_MERCHANT_NAME), WUSU_MERCHANT_NAME)
-    df["清洗_渠道"] = channel.where(channel.isin(CHANNEL_ORDER), "其他")
+    channel = df["清洗_渠道"].fillna("").astype(str).str.strip().replace(CHANNEL_ALIASES)
+    normalized = pd.Series("其他", index=df.index)
+    normalized = normalized.mask(channel.isin(WAREHOUSE_CHANNELS), "仓店")
+    if "清洗_商户" in df.columns and ONLINE_WINE_MERCHANTS:
+        merchant = df["清洗_商户"].fillna("").astype(str).str.strip()
+        normalized = normalized.mask(merchant.isin(ONLINE_WINE_MERCHANTS), "线上酒专店")
+    df["清洗_渠道"] = normalized
     return df
 
 
@@ -322,8 +399,11 @@ def matches_core_product_name(product: Any) -> bool:
     return any(re.search(group["matchPattern"], name, flags=re.IGNORECASE) for group in CORE_PRODUCT_GROUPS)
 
 
-def read_csv(path: Path) -> pd.DataFrame:
-    df = pd.read_csv(path, encoding="utf-8-sig", low_memory=False)
+def read_source_table(path: Path) -> pd.DataFrame:
+    if path.suffix.lower() in {".xlsx", ".xls"}:
+        df = pd.read_excel(path)
+    else:
+        df = pd.read_csv(path, encoding="utf-8-sig", low_memory=False)
     df = normalize_date_field(df)
     for col in ["清洗_大区", "清洗_渠道", "清洗_品牌", "清洗_商户", "清洗_商品名"]:
         if col in df.columns:
@@ -337,7 +417,19 @@ def source_files(period: dict[str, Any], platform_id: str, suffix: str) -> list[
         .get(platform_id, {})
         .get(suffix, period.get("sourceIds", [period["id"]]))
     )
-    paths = [SOURCE_DIR / f"{source_id}嘉士伯周报{suffix}" for source_id in source_ids]
+    paths = []
+    suffix_stem = suffix.removesuffix(".csv")
+    for source_id in source_ids:
+        exact = SOURCE_DIR / f"{source_id}嘉士伯周报{suffix}"
+        if exact.exists():
+            paths.append(exact)
+            continue
+        matches = sorted(SOURCE_DIR.glob(f"*{source_id}*嘉士伯周报{suffix_stem}*"))
+        matches = [path for path in matches if path.suffix.lower() in {".csv", ".xlsx", ".xls"}]
+        if matches:
+            paths.append(matches[0])
+        else:
+            paths.append(exact)
     missing = [path for path in paths if not path.exists()]
     if missing:
         raise FileNotFoundError(f"Missing source file(s): {', '.join(str(path) for path in missing)}")
@@ -345,15 +437,15 @@ def source_files(period: dict[str, Any], platform_id: str, suffix: str) -> list[
 
 
 def read_period_csvs(period: dict[str, Any], platform_id: str, suffix: str) -> pd.DataFrame:
-    frames = [read_csv(path) for path in source_files(period, platform_id, suffix)]
+    frames = [read_source_table(path) for path in source_files(period, platform_id, suffix)]
     if not frames:
         return pd.DataFrame()
     return pd.concat(frames, ignore_index=True)
 
 
 def load_targets() -> tuple[dict[tuple[str, int], dict[str, float]], dict[tuple[str, int, str], dict[str, float]]]:
-    target_df = pd.read_excel(SOURCE_DIR / "目标GMV.xlsx")
-    budget_df = pd.read_excel(SOURCE_DIR / "分BU预算金额.xlsx")
+    target_df = pd.read_excel(SOURCE_DIR / "目标GMV更新.xlsx")
+    budget_df = pd.read_excel(SOURCE_DIR / "分BU预算金额更新v0622.xlsx")
 
     platform_targets: dict[tuple[str, int], dict[str, float]] = {}
     for _, row in target_df.iterrows():
@@ -529,6 +621,7 @@ def build_breakdown(
     dimension_key: str,
     top_n_per_region: int | None = None,
     product_scoped: bool = False,
+    channel_targets: dict[tuple[str, int, str, str], float] | None = None,
 ) -> list[dict[str, Any]]:
     group_cols = ["date", "清洗_大区"]
     if product_scoped:
@@ -567,6 +660,12 @@ def build_breakdown(
             "subsidy": clean_number(row.get("subsidy")),
             "activityOrders": clean_number(row.get("activityOrders")),
         }
+        if dimension_key == "channel" and not product_scoped:
+            record["channelTargetGmv"] = clean_number(
+                (channel_targets or {}).get(
+                    (platform["sourcePlatform"], period["monthKey"], region, str(row[dimension_key])),
+                ),
+            )
         if product_scoped:
             record["product"] = str(row["product"])
         rows.append(enrich_record(record))
@@ -739,6 +838,7 @@ def aggregate_platform_reconciliation(
 
 def build_data() -> dict[str, Any]:
     platform_targets, bu_budget = load_targets()
+    channel_targets = load_channel_targets()
     periods = []
     for period in PERIODS:
         elapsed, days_in_month, progress = month_days(period)
@@ -754,7 +854,9 @@ def build_data() -> dict[str, Any]:
     records: list[dict[str, Any]] = []
     product_records: list[dict[str, Any]] = []
     channels: list[dict[str, Any]] = []
+    channel_details: list[dict[str, Any]] = []
     channels_by_product: list[dict[str, Any]] = []
+    channel_details_by_product: list[dict[str, Any]] = []
     brands: list[dict[str, Any]] = []
     brands_by_product: list[dict[str, Any]] = []
     merchants: list[dict[str, Any]] = []
@@ -821,7 +923,27 @@ def build_data() -> dict[str, Any]:
                 build_product_records(full_df, bill_df, platform, period, platform_id, platform_target, bu_budget)
             )
             channels.extend(
-                build_breakdown(full_df, bill_df, platform, period, platform_id, "清洗_渠道", "channel")
+                build_breakdown(
+                    full_df,
+                    bill_df,
+                    platform,
+                    period,
+                    platform_id,
+                    "清洗_渠道",
+                    "channel",
+                    channel_targets=channel_targets,
+                )
+            )
+            channel_details.extend(
+                build_breakdown(
+                    full_df,
+                    bill_df,
+                    platform,
+                    period,
+                    platform_id,
+                    CHANNEL_DETAIL_COL,
+                    "channel",
+                )
             )
             channels_by_product.extend(
                 build_breakdown(
@@ -831,6 +953,18 @@ def build_data() -> dict[str, Any]:
                     period,
                     platform_id,
                     "清洗_渠道",
+                    "channel",
+                    product_scoped=True,
+                )
+            )
+            channel_details_by_product.extend(
+                build_breakdown(
+                    full_df,
+                    bill_df,
+                    platform,
+                    period,
+                    platform_id,
+                    CHANNEL_DETAIL_COL,
                     "channel",
                     product_scoped=True,
                 )
@@ -934,7 +1068,9 @@ def build_data() -> dict[str, Any]:
         "productRecords": product_records,
         "breakdowns": {
             "channels": channels,
+            "channelDetails": channel_details,
             "channelsByProduct": channels_by_product,
+            "channelDetailsByProduct": channel_details_by_product,
             "brands": brands,
             "brandsByProduct": brands_by_product,
             "merchants": merchants,
@@ -974,7 +1110,7 @@ def write_logic_doc(data: dict[str, Any]) -> None:
 | 活动 GMV 占比 | `活动 GMV / 全量 GMV` | `活动 GMV / 全量 GMV` |
 | 活动折扣率 | `1 - 促销费 / 活动 GMV` | `1 - 促销费 / 活动 GMV` |
 | 目标 GMV | `目标GMV.xlsx` 按平台+年月匹配 | `目标GMV.xlsx` 按平台+年月匹配 |
-| BU 目标与预算 | `分BU预算金额.xlsx` 按平台+年月+区域匹配 | `分BU预算金额.xlsx` 按平台+年月+区域匹配 |
+| BU 目标与预算 | `分BU预算金额更新v0622.xlsx` 按平台+年月+区域匹配 | `分BU预算金额更新v0622.xlsx` 按平台+年月+区域匹配 |
 | 广告曝光费 | `6月目标&费用更新.xlsx` 的 `6月整体费用` 按平台+BU匹配 | `6月目标&费用更新.xlsx` 的 `6月整体费用` 按平台+BU匹配 |
 
 ## 单位说明
@@ -1000,7 +1136,8 @@ def write_logic_doc(data: dict[str, Any]) -> None:
 
 - 区域明细：11 个正式叶子区域 + `未识别` 兜底区域，可点击切换。
 - BU 聚合：CBC、CIB、华中按子区域求和；NX、XJ、YN 为独立区域。
-- 渠道下钻：全量表按清洗后的 `清洗_渠道` 统计 GMV，账单表按同字段补充活动 GMV 和促销费；淘宝闪购全量表 `渠道名称=闪力达` 时补充 `清洗_商户=闪力达`、`清洗_渠道=闪电仓`；淘宝闪购账单表中 `清洗_商户` 为 `瓜呱便利连锁管理`、`百惠优选`、`小飞象连锁超市`、`佳佳超市连锁管理`、`熊喵喝喝` 时补充 `清洗_渠道=闪电仓`；`中仓店` 与 `闪电仓` 合并为 `仓店`，`清洗_商户` 为 `乌苏啤酒/WUSU` 时渠道同步归为 `乌苏啤酒/WUSU`，其余未列渠道合并为 `其他`。
+- 渠道图表：用于 `渠道GMV及达成率` 的渠道口径按目标文件归集为 `线上酒专店`、`仓店`、`其他` 三类，其中线上酒专店按 `线上酒专营匹配表.xlsx` 的商户匹配，`中仓店/闪电仓/仓店` 合并为仓店，其余归其他。
+- 渠道表：保留源表 `清洗_渠道` 字段原始维度统计，全量明细与账单明细均按该字段聚合；空白、nan、未识别归入 `其它`，页面按全量 GMV 降序展示。
 - 品牌下钻：按 `清洗_品牌` 聚合。
 - 商户下钻：每个平台、周期、区域保留 GMV Top 18，用于页面明细查看；商品维度仅保留核心单品相关数据。
 - 核心单品筛选下的区域汇总：按 `清洗_大区 + 清洗_商品名` 聚合后，再按核心单品规则合并 SKU；目标/预算仍按平台、年月、BU区域匹配，多 SKU 合并时按 `平台+周期+区域` 去重，避免重复累加 BU 目标和预算。
@@ -1056,6 +1193,7 @@ BREAKDOWN_EXPORT_KEYS = [
     "users",
     "activityGmv",
     "subsidy",
+    "channelTargetGmv",
 ]
 
 ACTIVITY_EXPORT_KEYS = [
@@ -1105,6 +1243,14 @@ def main() -> None:
                     ],
                     BREAKDOWN_EXPORT_KEYS,
                 ),
+                "channelDetailsByProduct": compact_rows(
+                    [
+                        row
+                        for row in data["breakdowns"]["channelDetailsByProduct"]
+                        if row["platformId"] == platform_id
+                    ],
+                    BREAKDOWN_EXPORT_KEYS,
+                ),
                 "brandsByProduct": compact_rows(
                     [
                         row
@@ -1138,8 +1284,10 @@ def main() -> None:
 
     core_breakdowns = {
         "channels": compact_rows(data["breakdowns"]["channels"], BREAKDOWN_EXPORT_KEYS),
+        "channelDetails": compact_rows(data["breakdowns"]["channelDetails"], BREAKDOWN_EXPORT_KEYS),
         "brands": compact_rows(data["breakdowns"]["brands"], BREAKDOWN_EXPORT_KEYS),
         "merchants": compact_rows(data["breakdowns"]["merchants"], BREAKDOWN_EXPORT_KEYS),
+        "products": compact_rows(data["breakdowns"]["products"], BREAKDOWN_EXPORT_KEYS),
         "activities": compact_rows(data["breakdowns"]["activities"], ACTIVITY_EXPORT_KEYS),
     }
     core_data = {

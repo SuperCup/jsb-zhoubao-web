@@ -347,6 +347,15 @@ select {
   overflow-wrap: anywhere;
 }
 
+.core-metric-card.without-sub .core-metric-value {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  justify-content: center;
+  margin-top: 0;
+  width: 100%;
+}
+
 .core-metric-sub {
   max-width: 100%;
   margin-top: 8px;
@@ -354,6 +363,10 @@ select {
   color: var(--ink);
   font-size: 13px;
   line-height: 1.35;
+}
+
+.core-metric-sub span {
+  display: block;
 }
 
 .kpi-meta {
@@ -1112,6 +1125,23 @@ select {
   overflow-y: hidden;
   border: 1px solid var(--line);
   border-radius: 8px;
+}
+
+.table-subsection {
+  margin: 16px 0 8px;
+}
+
+.table-subsection h3 {
+  margin: 0;
+  color: var(--ink);
+  font-size: 18px;
+  line-height: 1.25;
+}
+
+.product-top-table th:first-child,
+.product-top-table td:first-child {
+  max-width: 420px;
+  min-width: 260px;
 }
 
 .table-notes {

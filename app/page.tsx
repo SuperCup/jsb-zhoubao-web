@@ -124,7 +124,9 @@ type DataShape = {
   productRecords?: MetricRow[];
   breakdowns: {
     channels: BreakdownRow[];
+    channelDetails?: BreakdownRow[];
     channelsByProduct?: BreakdownRow[];
+    channelDetailsByProduct?: BreakdownRow[];
     brands: BreakdownRow[];
     brandsByProduct?: BreakdownRow[];
     merchants: BreakdownRow[];
@@ -268,6 +270,10 @@ async function loadDashboardData(): Promise<DataShape> {
         channelsByProduct: [
           ...(merged.breakdowns.channelsByProduct ?? []),
           ...(payload.breakdowns.channelsByProduct ?? []),
+        ],
+        channelDetailsByProduct: [
+          ...(merged.breakdowns.channelDetailsByProduct ?? []),
+          ...(payload.breakdowns.channelDetailsByProduct ?? []),
         ],
         brandsByProduct: [
           ...(merged.breakdowns.brandsByProduct ?? []),
@@ -706,7 +712,7 @@ function SegmentButton({
 type CoreMetric = {
   label: string;
   value: string;
-  sub: string;
+  sub?: string | string[];
   status: string;
   statusTone?: "good" | "bad" | "neutral" | "warn";
   tone?: "good" | "bad" | "neutral" | "warn";
@@ -741,13 +747,19 @@ function CoreMetricCard({
   variant: "merged" | "platform";
 }) {
   return (
-    <article className={`core-metric-card ${variant} ${metric.tone ?? "neutral"}`}>
+    <article className={`core-metric-card ${variant} ${metric.tone ?? "neutral"} ${metric.sub ? "" : "without-sub"}`}>
       <div className="core-metric-topline">
         <div className="core-metric-label">{metric.label}</div>
         <span className={`kpi-status ${metric.statusTone ?? metric.tone ?? "neutral"}`}>{metric.status}</span>
       </div>
       <div className="core-metric-value">{metric.value}</div>
-      <div className="core-metric-sub">{metric.sub}</div>
+      {metric.sub ? (
+        <div className="core-metric-sub">
+          {Array.isArray(metric.sub)
+            ? metric.sub.map((line) => <span key={line}>{line}</span>)
+            : metric.sub}
+        </div>
+      ) : null}
     </article>
   );
 }
@@ -1472,6 +1484,7 @@ function collectBreakdown(
   selectedProduct = PRODUCT_ALL,
   groups: CoreProductGroup[] = DEFAULT_CORE_PRODUCT_GROUPS,
   dateRange: DateRangeOption = DEFAULT_DATE_RANGE,
+  sortByChannelOrder = true,
 ) {
   const grouped = new Map<string, MetricRow[]>();
   rows
@@ -1492,10 +1505,10 @@ function collectBreakdown(
   return Array.from(grouped.entries())
     .map(([name, bucket]) => {
       const agg = aggregateRows(bucket);
-      // channelTargetGmv: use unique (platformId, channel) pairs to avoid double-counting
+      // channelTargetGmv is monthly by platform + region + channel; rows are daily, so de-duplicate before summing.
       const seenTargets = new Set<string>();
       const targetGmv = bucket.reduce((sum, row) => {
-        const key = `${row.platformId}|${name}`;
+        const key = `${row.platformId}|${row.region}|${name}`;
         if (!seenTargets.has(key)) {
           seenTargets.add(key);
           return sum + ((row as any).channelTargetGmv || 0);
@@ -1505,7 +1518,7 @@ function collectBreakdown(
       return { name, ...agg, channelTargetGmv: targetGmv };
     })
     .sort((a, b) => {
-      if (key === "channel") {
+      if (key === "channel" && sortByChannelOrder) {
         const aIndex = CHANNEL_ORDER.indexOf(a.name);
         const bIndex = CHANNEL_ORDER.indexOf(b.name);
         if (aIndex !== -1 || bIndex !== -1) {
@@ -1927,25 +1940,28 @@ function buildNarrative({
         `结果跟踪：下周复盘同时看GMV环比、促销费比和活动GMV占比，避免只用补贴拉动短期销量。`,
       ];
 
+  const huazhongRegion = regionDrivers.find((item) => item.node === "华中");
+  const huazhongNonHunanRegion = regionDrivers.find((item) => item.node === "华中-非湖南");
+  const xjRegion = regionDrivers.find((item) => item.node === "XJ");
+  const activityShareDelta = current.activityShare !== null && previous.activityShare !== null
+    ? current.activityShare - previous.activityShare
+    : null;
+  const xjBudgetOver = xjRegion?.current.promoBudgetRemaining !== null && xjRegion?.current.promoBudgetRemaining !== undefined
+    ? Math.max(0, -xjRegion.current.promoBudgetRemaining)
+    : 0;
+  const xjProjectedOver =
+    xjRegion?.current.timeProgress && xjRegion.current.promoBudgetUsage !== null && xjRegion.current.budget
+      ? Math.max(0, xjRegion.current.budget * (xjRegion.current.promoBudgetUsage / xjRegion.current.timeProgress - 1))
+      : 0;
   const risks = [
-    includeTargetBudget && feeRisk !== null && feeRisk > 0
-      ? `促销费比高于目标 ${formatPointDistance(feeRisk)}，建议优先复盘${feeRiskTarget}的活动机制和SKU销售。`
-      : null,
-    includeTargetBudget && budgetPressure !== null && budgetPressure > 0.1
-      ? `${fastBudgetRegion?.node ?? regionLabel}预算使用率快于时间进度 ${formatPointDistance(budgetPressure)}，建议确认是否受全国活动影响，并评估区域预算节奏。`
-      : null,
-    activityRiskLevel === "high"
-      ? `活动GMV占比 ${formatPercent(current.activityShare)} 偏高，需关注自然GMV是否跟上和活动后回落风险。`
-      : activityRiskLevel === "watch"
-        ? `活动GMV占比 ${formatPercent(current.activityShare)} 需观察，建议同步跟踪自然渠道和核心SKU表现。`
-        : null,
-    highFeeRegion
-      ? `${highFeeRegion.node}促销费比 ${formatPercent(highFeeRegion.current.promoFeeRatio)}，建议进一步拆解渠道和活动表现。`
-      : null,
-    weakDriver
-      ? `${weakDriver.node}本周环比下降或低于预期，建议进一步拆解渠道、活动和供给是否到位。`
-      : null,
-  ].filter((item): item is string => Boolean(item));
+    `活动GMV占比环比${activityShareDelta !== null && activityShareDelta < 0 ? "下降" : "上升"}${formatPointDistance(activityShareDelta)}，当前绝对值仍为${formatPercent(current.activityShare)}，需继续关注自然GMV承接能力。`,
+    huazhongRegion
+      ? `华中BU整体达成率${formatPercent(huazhongRegion.current.targetAchievement)}，${huazhongRegion.current.targetAchievement !== null && huazhongRegion.current.timeProgress !== null ? `${huazhongRegion.current.targetAchievement >= huazhongRegion.current.timeProgress ? "领先" : "落后"}时间进度${formatPointDistance((huazhongRegion.current.targetAchievement ?? 0) - (huazhongRegion.current.timeProgress ?? 0))}` : "时间进度暂缺"}${huazhongNonHunanRegion ? `，其中非湖南地区达成率仅${formatPercent(huazhongNonHunanRegion.current.targetAchievement, 0)}` : ""}。`
+      : `华中BU本周目标达成率暂无法拆解，需优先核对区域目标与GMV数据。`,
+    xjRegion
+      ? `XJ促销预算使用进度已达${formatPercent(xjRegion.current.promoBudgetUsage, 0)}，当前超支${formatMoney(xjBudgetOver)}，按当前节奏预计全月超支${formatMoney(xjProjectedOver)}左右。`
+      : `XJ预算使用进度暂无法拆解，需优先核对区域预算与促销费数据。`,
+  ];
 
   const summary = [
     {
@@ -2255,6 +2271,13 @@ function Dashboard({ data }: { data: DataShape }) {
     () => (effectiveProduct === PRODUCT_ALL ? data.breakdowns.channels : data.breakdowns.channelsByProduct ?? []),
     [data, effectiveProduct],
   );
+  const channelDetailSourceRows = useMemo(
+    () =>
+      effectiveProduct === PRODUCT_ALL
+        ? data.breakdowns.channelDetails ?? data.breakdowns.channels
+        : data.breakdowns.channelDetailsByProduct ?? data.breakdowns.channelsByProduct ?? [],
+    [data, effectiveProduct],
+  );
   const brandSourceRows = useMemo(
     () => (effectiveProduct === PRODUCT_ALL ? data.breakdowns.brands : data.breakdowns.brandsByProduct ?? []),
     [data, effectiveProduct],
@@ -2272,7 +2295,7 @@ function Dashboard({ data }: { data: DataShape }) {
     () =>
       collectBreakdown(
         data,
-        channelSourceRows,
+        channelDetailSourceRows,
         "channel",
         period,
         selectedPlatforms,
@@ -2280,14 +2303,15 @@ function Dashboard({ data }: { data: DataShape }) {
         effectiveProduct,
         availableCoreProductGroups,
         selectedDateRange,
+        false,
       ),
-    [data, channelSourceRows, period, selectedPlatforms, selectedLeaves, effectiveProduct, availableCoreProductGroups, selectedDateRange],
+    [data, channelDetailSourceRows, period, selectedPlatforms, selectedLeaves, effectiveProduct, availableCoreProductGroups, selectedDateRange],
   );
   const previousChannels = useMemo(
     () =>
       collectBreakdown(
         data,
-        channelSourceRows,
+        channelDetailSourceRows,
         "channel",
         data.metadata.previousPeriodId,
         selectedPlatforms,
@@ -2295,14 +2319,15 @@ function Dashboard({ data }: { data: DataShape }) {
         effectiveProduct,
         availableCoreProductGroups,
         selectedDateRange,
+        false,
       ),
-    [data, channelSourceRows, selectedPlatforms, selectedLeaves, effectiveProduct, availableCoreProductGroups, selectedDateRange],
+    [data, channelDetailSourceRows, selectedPlatforms, selectedLeaves, effectiveProduct, availableCoreProductGroups, selectedDateRange],
   );
   const lastYearChannels = useMemo(
     () =>
       collectBreakdown(
         data,
-        channelSourceRows,
+        channelDetailSourceRows,
         "channel",
         data.metadata.lastYearPeriodId,
         selectedPlatforms,
@@ -2310,8 +2335,9 @@ function Dashboard({ data }: { data: DataShape }) {
         effectiveProduct,
         availableCoreProductGroups,
         selectedDateRange,
+        false,
       ),
-    [data, channelSourceRows, selectedPlatforms, selectedLeaves, effectiveProduct, availableCoreProductGroups, selectedDateRange],
+    [data, channelDetailSourceRows, selectedPlatforms, selectedLeaves, effectiveProduct, availableCoreProductGroups, selectedDateRange],
   );
   const brands = useMemo(
     () =>
@@ -2438,7 +2464,59 @@ function Dashboard({ data }: { data: DataShape }) {
         : collectCoreSkuRows(data, data.metadata.lastYearPeriodId, selectedPlatforms, selectedLeaves, effectiveProduct, availableCoreProductGroups, selectedDateRange),
     [data, selectedPlatforms, selectedLeaves, effectiveProduct, availableCoreProductGroups, selectedDateRange],
   );
+  const productRows = useMemo(
+    () =>
+      effectiveProduct === PRODUCT_ALL
+        ? collectBreakdown(
+            data,
+            data.breakdowns.products ?? [],
+            "product",
+            period,
+            selectedPlatforms,
+            selectedLeaves,
+            effectiveProduct,
+            availableCoreProductGroups,
+            selectedDateRange,
+          )
+        : coreSkuRows,
+    [data, period, selectedPlatforms, selectedLeaves, effectiveProduct, availableCoreProductGroups, selectedDateRange, coreSkuRows],
+  );
+  const previousProductRows = useMemo(
+    () =>
+      effectiveProduct === PRODUCT_ALL
+        ? collectBreakdown(
+            data,
+            data.breakdowns.products ?? [],
+            "product",
+            data.metadata.previousPeriodId,
+            selectedPlatforms,
+            selectedLeaves,
+            effectiveProduct,
+            availableCoreProductGroups,
+            selectedDateRange,
+          )
+        : previousCoreSkuRows,
+    [data, selectedPlatforms, selectedLeaves, effectiveProduct, availableCoreProductGroups, selectedDateRange, previousCoreSkuRows],
+  );
+  const lastYearProductRows = useMemo(
+    () =>
+      effectiveProduct === PRODUCT_ALL
+        ? collectBreakdown(
+            data,
+            data.breakdowns.products ?? [],
+            "product",
+            data.metadata.lastYearPeriodId,
+            selectedPlatforms,
+            selectedLeaves,
+            effectiveProduct,
+            availableCoreProductGroups,
+            selectedDateRange,
+          )
+        : lastYearCoreSkuRows,
+    [data, selectedPlatforms, selectedLeaves, effectiveProduct, availableCoreProductGroups, selectedDateRange, lastYearCoreSkuRows],
+  );
   const displayCoreSkuRows = useMemo(() => topAggregateRows(coreSkuRows), [coreSkuRows]);
+  const topProductRows = useMemo(() => productRows.slice(0, 10), [productRows]);
   const displayPreviousCoreSkuRows = useMemo(() => topAggregateRows(previousCoreSkuRows), [previousCoreSkuRows]);
   const displayLastYearCoreSkuRows = useMemo(() => topAggregateRows(lastYearCoreSkuRows), [lastYearCoreSkuRows]);
   const displayActivities = useMemo(() => topActivityRows(activities), [activities]);
@@ -2515,7 +2593,10 @@ function Dashboard({ data }: { data: DataShape }) {
           {
             label: "活动GMV",
             value: formatMoney(row.activityGmv),
-            sub: `占比全量GMV ${formatPercent(row.activityShare)} · 环比${formatDelta(activityGmvWow)} 同比${formatDelta(activityGmvYoy)}`,
+            sub: [
+              `占比全量GMV ${formatPercent(row.activityShare)}`,
+              `环比${formatDelta(activityGmvWow)} 同比${formatDelta(activityGmvYoy)}`,
+            ],
             status: activityShareStatus(row.activityShare),
             statusTone: row.activityShare !== null && row.activityShare >= 0.7 ? "warn" : "neutral",
             tone: row.activityShare !== null && row.activityShare >= 0.7 ? "warn" : "neutral",
@@ -2523,7 +2604,10 @@ function Dashboard({ data }: { data: DataShape }) {
           {
             label: "自然GMV",
             value: formatMoney(naturalGmv),
-            sub: `占比全量GMV ${formatPercent(safeRatio(naturalGmv, row.gmv))} · 环比${formatDelta(naturalGmvWow)} 同比${formatDelta(naturalGmvYoy)}`,
+            sub: [
+              `占比全量GMV ${formatPercent(safeRatio(naturalGmv, row.gmv))}`,
+              `环比${formatDelta(naturalGmvWow)} 同比${formatDelta(naturalGmvYoy)}`,
+            ],
             status: "自然销售",
             statusTone: "neutral",
             tone: "neutral",
@@ -2531,7 +2615,6 @@ function Dashboard({ data }: { data: DataShape }) {
           {
             label: "广告曝光费",
             value: formatMoney(row.advertisingExposureFee),
-            sub: `占比全量GMV ${formatPercent(safeRatio(row.advertisingExposureFee, row.gmv))}`,
             status: "曝光投入",
             statusTone: "neutral",
             tone: "neutral",
@@ -2569,6 +2652,8 @@ function Dashboard({ data }: { data: DataShape }) {
             bar3Label: formatMoney(row.advertisingExposureFee),
             primary: row.promoBudgetUsage,
             primaryLabel: formatPercent(row.promoBudgetUsage, 0),
+            secondary: includeTargetBudget ? row.timeProgress : null,
+            secondaryLabel: includeTargetBudget ? formatPercent(row.timeProgress, 0) : undefined,
           };
         });
         const promoFeeRows = regionNodes.map((node) => {
@@ -2590,7 +2675,8 @@ function Dashboard({ data }: { data: DataShape }) {
           effectiveProduct,
           availableCoreProductGroups,
           selectedDateRange,
-        ).map((row) => ({
+        );
+        const channelChartRows = channelRows.map((row) => ({
             label: row.name,
             bar: row.gmv,
             barLabel: formatMoney(row.gmv),
@@ -2603,7 +2689,7 @@ function Dashboard({ data }: { data: DataShape }) {
           ...scope,
           regionSummaryRows,
           budgetSummaryRows,
-          channelRows,
+          channelRows: channelChartRows,
           promoFeeRows,
         };
       }),
@@ -2659,6 +2745,7 @@ function Dashboard({ data }: { data: DataShape }) {
     effectiveProduct === PRODUCT_ALL ? "年度核心单品" : selectedProductLabel;
   const selectedScopeLabel =
     effectiveProduct === PRODUCT_ALL ? selectedPlatformLabel : `${selectedPlatformLabel} · ${selectedProductLabel}`;
+  const noteScopeLabel = selectedPlatformLabel;
 
   const narrative = useMemo(
     () =>
@@ -2701,24 +2788,6 @@ function Dashboard({ data }: { data: DataShape }) {
   const channelTableNotes = useMemo(() => {
     return tableNotes(narrative.channelNotes);
   }, [narrative.channelNotes]);
-
-  const brandTableNotes = useMemo(() => {
-    const topBrand = brands[0];
-    const topThreeShare = brands
-      .slice(0, 3)
-      .reduce((sum, row) => sum + (safeRatio(row.gmv, current.gmv) ?? 0), 0);
-    const activityHeavyBrand = brands
-      .filter((row) => row.gmv > current.gmv * 0.01 && row.activityShare !== null)
-      .sort((a, b) => (b.activityShare ?? 0) - (a.activityShare ?? 0))[0];
-    return tableNotes([
-      topBrand
-        ? `${topBrand.name}贡献最高，前三品牌合计占比 ${formatPercent(topThreeShare)}。`
-        : null,
-      activityHeavyBrand
-        ? `${activityHeavyBrand.name}活动GMV占比 ${formatPercent(activityHeavyBrand.activityShare)}，需关注自然销售是否跟上。`
-        : null,
-    ]);
-  }, [brands, current.gmv]);
 
   const activityTableNotes = useMemo(() => {
     return tableNotes(narrative.activityNotes);
@@ -2865,11 +2934,11 @@ function Dashboard({ data }: { data: DataShape }) {
             </article>
             <article className="diagnostic-card">
               <h3>重点关注</h3>
-              <ul className="narrative-list">
+              <ol className="narrative-list ordered">
                 {narrative.risks.map((item) => (
                   <li key={item}>{item}</li>
                 ))}
-              </ul>
+              </ol>
             </article>
             <article className="diagnostic-card">
               <h3>行动建议</h3>
@@ -2996,7 +3065,7 @@ function Dashboard({ data }: { data: DataShape }) {
                         bar2Name="剩余预算金额"
                         bar3Name="曝光费"
                         primaryName="促销预算使用率"
-                        lineMax={1}
+                        secondaryName="时间进度"
                         onExpand={() =>
                           setExpandedChart({
                             title: budgetTitle,
@@ -3008,7 +3077,7 @@ function Dashboard({ data }: { data: DataShape }) {
                                 bar2Name="剩余预算金额"
                                 bar3Name="曝光费"
                                 primaryName="促销预算使用率"
-                                lineMax={1}
+                                secondaryName="时间进度"
                                 expanded
                               />
                             ),
@@ -3150,7 +3219,7 @@ function Dashboard({ data }: { data: DataShape }) {
               </tbody>
             </table>
           </div>
-          <TableNotes title="淘宝闪购BY区域小结" items={regionTableNotes} />
+          <TableNotes title={`${noteScopeLabel}BY区域小结`} items={regionTableNotes} />
         </Panel>
       </section>
 
@@ -3175,7 +3244,7 @@ function Dashboard({ data }: { data: DataShape }) {
                 </tr>
               </thead>
               <tbody>
-                {channels.slice(0, CHANNEL_ORDER.length).map((row) => {
+                {channels.map((row) => {
                   const prev = findNamed(previousChannels, row.name);
                   const last = findNamed(lastYearChannels, row.name);
                   return (
@@ -3198,7 +3267,7 @@ function Dashboard({ data }: { data: DataShape }) {
               </tbody>
             </table>
           </div>
-          <TableNotes title="淘宝闪购BY渠道小结" items={channelTableNotes} />
+          <TableNotes title={`${noteScopeLabel}BY渠道小结`} items={channelTableNotes} />
         </Panel>
       </section>
 
@@ -3291,7 +3360,45 @@ function Dashboard({ data }: { data: DataShape }) {
               </tbody>
             </table>
           </div>
-          <TableNotes title="淘宝闪购BY品牌小结" items={brandTableNotes} />
+          <div className="table-subsection">
+            <h3>TOP商品表</h3>
+          </div>
+          <div className="table-scroll">
+            <table className="metric-table product-top-table">
+              <thead>
+                <tr>
+                  <th>商品</th>
+                  <th>全量GMV</th>
+                  <th>费比</th>
+                  <th>{colLabel("环比", "全量GMV")}</th>
+                  <th>{colLabel("同比", "全量GMV")}</th>
+                  <th>{colLabel("全量GMV", "占比")}</th>
+                  <th>活动GMV</th>
+                  <th>活动GMV占比</th>
+                  <th>活动折扣率</th>
+                </tr>
+              </thead>
+              <tbody>
+                {topProductRows.map((row) => {
+                  const prev = findNamed(previousProductRows, row.name);
+                  const last = findNamed(lastYearProductRows, row.name);
+                  return (
+                    <tr key={row.name}>
+                      <th>{row.name}</th>
+                      <td>{formatMoney(row.gmv)}</td>
+                      <td className={promoFeeAlert(row)}>{formatPercent(row.promoFeeRatio)}</td>
+                      <td className={trendTone(prev ? compareAggregate(row, prev) : null)}>{formatDelta(prev ? compareAggregate(row, prev) : null)}</td>
+                      <td className={trendTone(last ? compareAggregate(row, last) : null)}>{formatDelta(last ? compareAggregate(row, last) : null)}</td>
+                      <td>{formatPercent(safeRatio(row.gmv, current.gmv))}</td>
+                      <td>{formatMoney(row.activityGmv)}</td>
+                      <td className={activityShareAlert(row.activityShare)}>{formatPercent(row.activityShare)}</td>
+                      <td>{formatPercent(row.activityDiscount)}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         </Panel>
       </section>
 
@@ -3335,7 +3442,7 @@ function Dashboard({ data }: { data: DataShape }) {
               </tbody>
             </table>
           </div>
-          <TableNotes title="淘宝闪购BY活动小结" items={activityTableNotes} />
+          <TableNotes title={`${noteScopeLabel}BY活动小结`} items={activityTableNotes} />
         </Panel>
       </section>
 

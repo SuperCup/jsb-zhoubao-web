@@ -653,6 +653,22 @@ function selectedRegionLabel(region: string): string {
   return region === REGION_ALL ? "全国/全区域" : region;
 }
 
+function normalizeChannelDisplayName(value: unknown): string {
+  const name = String(value ?? "其他").trim();
+  if (!name || name === "未识别" || name.toLowerCase() === "nan") return "其他";
+  if (name === "闪电仓" || name === "中仓店") return "仓店";
+  if (name === "其它") return "其他";
+  if (name === "散店-超市" || name === "散店-食品食材" || name === "散店-便利店" || name === "食品食材") return "其他";
+  if (name.includes("�")) {
+    if (name.includes("仓") || /^�+店$/.test(name)) return "仓店";
+    if (name.includes("酒类")) return "酒类专营店";
+    if (name.includes("连锁超")) return "连锁超市";
+    if (name.includes("连锁便利")) return "连锁便利店";
+    if (name.includes("其")) return "其他";
+  }
+  return name;
+}
+
 function isOneLiterProduct(product: string): boolean {
   if (product === PRODUCT_ALL) return false;
   const normalized = product.replace(/\s+/g, "");
@@ -1497,7 +1513,7 @@ function collectBreakdown(
         matchesCoreProduct(row.product, selectedProduct, groups),
     )
     .forEach((row) => {
-      const name = String(row[key] ?? "未识别");
+      const name = key === "channel" ? normalizeChannelDisplayName(row[key]) : String(row[key] ?? "未识别");
       const bucket = grouped.get(name) ?? [];
       bucket.push(row);
       grouped.set(name, bucket);

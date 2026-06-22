@@ -343,12 +343,30 @@ def load_online_wine_merchants() -> set[str]:
 ONLINE_WINE_MERCHANTS = load_online_wine_merchants()
 
 
+def normalize_channel_detail_name(value: Any) -> str:
+    name = str(value).strip()
+    if not name or name.lower() in {"nan", "none", "未识别"}:
+        return "其他"
+    if name in CHANNEL_DETAIL_ALIASES:
+        return CHANNEL_DETAIL_ALIASES[name]
+    if "�" in name:
+        if "仓" in name:
+            return "仓店"
+        if "酒类" in name:
+            return "酒类专营店"
+        if "连锁超" in name:
+            return "连锁超市"
+        if "连锁便利" in name:
+            return "连锁便利店"
+    return name
+
+
 def normalize_channel_fields(df: pd.DataFrame) -> pd.DataFrame:
     if "清洗_渠道" not in df.columns:
         return df
     raw_channel = df["清洗_渠道"].fillna("").astype(str).str.strip()
     raw_channel = raw_channel.mask(raw_channel.str.lower().isin({"", "nan", "none", "未识别"}), "其他")
-    raw_channel = raw_channel.replace(CHANNEL_DETAIL_ALIASES)
+    raw_channel = raw_channel.map(normalize_channel_detail_name)
     df[CHANNEL_DETAIL_COL] = raw_channel
     if {"饿了么订单号", "清洗_商户"}.issubset(df.columns):
         warehouse_bill_merchants = df["清洗_商户"].astype(str).str.strip().isin(TAOBAO_WAREHOUSE_BILL_MERCHANTS)

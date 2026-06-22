@@ -406,6 +406,24 @@ select {
   line-height: 1.25;
 }
 
+.panel-collapse-btn {
+  flex-shrink: 0;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface-soft);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  padding: 4px 10px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.panel-collapse-btn:hover {
+  background: var(--green-soft);
+  color: var(--green);
+}
+
 .region-table {
   display: grid;
   gap: 8px;
@@ -788,6 +806,10 @@ select {
   background: var(--green);
 }
 
+.chart-legend .legend-bar-3::before {
+  background: var(--amber);
+}
+
 .chart-legend .legend-secondary::before {
   height: 3px;
   border-radius: 3px;
@@ -817,6 +839,10 @@ select {
 
 .chart-bar.secondary-bar {
   fill: var(--green);
+}
+
+.chart-bar.tertiary-bar {
+  fill: var(--amber);
 }
 
 .chart-line {
@@ -865,6 +891,10 @@ select {
   fill: var(--green);
 }
 
+.bar3-label {
+  fill: var(--amber);
+}
+
 .primary-label {
   fill: var(--pink);
 }
@@ -888,6 +918,135 @@ select {
   margin-top: 12px;
   border-top: 1px solid var(--line);
   padding-top: 12px;
+}
+
+.daily-trend-section {
+  margin-bottom: 16px;
+}
+
+.daily-trend-chart {
+  width: 100%;
+}
+
+.trend-legend {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px 10px;
+}
+
+.legend-trend {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 1px 4px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 7px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.legend-trend::before {
+  display: inline-block;
+  width: 10px;
+  height: 3px;
+  border-radius: 3px;
+  background: var(--trend-color, var(--blue));
+  content: "";
+}
+
+.legend-trend:hover {
+  border-color: var(--trend-color, var(--blue));
+  background: color-mix(in srgb, var(--trend-color, var(--blue)) 8%, #fff);
+  color: var(--ink);
+}
+
+.legend-trend-hidden {
+  opacity: 0.45;
+  text-decoration: line-through;
+}
+
+.legend-trend-hidden::before {
+  opacity: 0.3;
+}
+
+.trend-line {
+  fill: none;
+  stroke-width: 1.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transition: opacity 0.2s ease;
+}
+
+.trend-point {
+  stroke-width: 1.2;
+  transition: opacity 0.2s ease;
+}
+
+.trend-point-label {
+  font-size: 6px;
+  font-weight: 600;
+  paint-order: stroke;
+  stroke: #fff;
+  stroke-width: 1.5px;
+  stroke-linejoin: round;
+}
+
+.expanded-chart .trend-point-label {
+  font-size: 11px;
+  stroke-width: 3px;
+}
+
+.trend-end-label {
+  font-size: 7px;
+  font-weight: 760;
+  paint-order: stroke;
+  stroke: #fff;
+  stroke-width: 3px;
+  stroke-linejoin: round;
+}
+
+/* 展开模式恢复原始大小 */
+.expanded-chart .trend-line {
+  stroke-width: 2.8;
+}
+
+.expanded-chart .trend-point {
+  stroke-width: 2.5;
+}
+
+.expanded-chart .trend-end-label {
+  font-size: 12px;
+  stroke-width: 4px;
+}
+
+.expanded-chart .daily-trend-svg .chart-axis-label {
+  font-size: 12px;
+}
+
+.expanded-chart .daily-trend-svg .chart-x-label {
+  font-size: 12px;
+}
+
+.daily-trend-svg .chart-grid-line {
+  stroke: #e8eee9;
+  stroke-width: 0.5;
+}
+
+.daily-trend-svg .chart-axis-label {
+  fill: #75837d;
+  font-size: 7px;
+}
+
+.daily-trend-svg .chart-x-label {
+  fill: #5f6f68;
+  font-size: 7px;
 }
 
 .chart-modal-backdrop {

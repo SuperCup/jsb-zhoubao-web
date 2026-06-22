@@ -152,7 +152,7 @@ CORE_PRODUCT_GROUPS = [
     }
 ]
 
-CHANNEL_ORDER = ["酒类专营店", "乌苏啤酒/WUSU", "连锁便利店", "连锁超市", "仓店", "其他"]
+CHANNEL_ORDER = ["线上酒专店", "仓店", "其他"]
 CHANNEL_ALIASES = {
     "中仓店": "仓店",
     "闪电仓": "仓店",

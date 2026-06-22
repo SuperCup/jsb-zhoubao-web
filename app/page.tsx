@@ -147,10 +147,7 @@ const TOP_ROW_LIMIT = 10;
 const OTHER_LABEL = "其它";
 const GROUP_ORDER = ["CBC", "CIB", "NX", "XJ", "YN", "华中", "未识别"];
 const CHANNEL_ORDER = [
-  "酒类专营店",
-  "乌苏啤酒/WUSU",
-  "连锁便利店",
-  "连锁超市",
+  "线上酒专店",
   "仓店",
   "其他",
 ];
@@ -198,20 +195,20 @@ const DEFAULT_CORE_PRODUCT_GROUPS: CoreProductGroup[] = [
   },
 ];
 const EXCEL_REGION_ROWS = [
-  "CBC-CQ",
-  "CBC-SC",
   "CBC",
-  "CIB东南",
-  "CIB华北",
-  "CIB华南",
-  "CIB苏皖",
   "CIB",
   "NX",
   "XJ",
   "YN",
+  "华中",
+  "CBC-CQ",
+  "CBC-SC",
+  "CIB东南",
+  "CIB华北",
+  "CIB华南",
+  "CIB苏皖",
   "华中-湖南",
   "华中-非湖南",
-  "华中",
   "总计",
 ];
 
@@ -585,12 +582,12 @@ function formatPercent(value: number | null | undefined, digits = 1): string {
 function formatPointDelta(value: number | null | undefined): string {
   if (value === null || value === undefined || Number.isNaN(value)) return "-";
   const sign = value > 0 ? "+" : "";
-  return `${sign}${(value * 100).toFixed(1)}pp`;
+  return `${sign}${(value * 100).toFixed(1)}%`;
 }
 
 function formatPointDistance(value: number | null | undefined): string {
   if (value === null || value === undefined || Number.isNaN(value)) return "-";
-  return `${(Math.abs(value) * 100).toFixed(1)}pp`;
+  return `${(Math.abs(value) * 100).toFixed(1)}%`;
 }
 
 function formatDelta(value: number | null | undefined): string {
@@ -728,6 +725,8 @@ type ComboChartRow = {
   barLabel?: string;
   bar2?: number | null;
   bar2Label?: string;
+  bar3?: number | null;
+  bar3Label?: string;
   primary?: number | null;
   primaryLabel?: string;
   secondary?: number | null;
@@ -840,6 +839,7 @@ function ComboBarLineChart({
   rows,
   barName,
   bar2Name,
+  bar3Name,
   primaryName,
   secondaryName,
   barFormatter = formatMoney,
@@ -852,6 +852,7 @@ function ComboBarLineChart({
   rows: ComboChartRow[];
   barName: string;
   bar2Name?: string;
+  bar3Name?: string;
   primaryName: string;
   secondaryName?: string;
   barFormatter?: (value: number | null | undefined) => string;
@@ -872,8 +873,9 @@ function ComboBarLineChart({
   const plotBottom = top + plotHeight;
   const step = plotWidth / Math.max(chartRows.length, 1);
   const hasSecondBar = Boolean(bar2Name);
-  const barWidth = Math.max(10, Math.min(hasSecondBar ? 22 : 34, step * (hasSecondBar ? 0.28 : 0.46)));
-  const barMax = niceAmountMax(chartRows.flatMap((row) => [row.bar, row.bar2]));
+  const hasThirdBar = Boolean(bar3Name);
+  const barWidth = Math.max(8, Math.min(hasThirdBar ? 18 : hasSecondBar ? 22 : 34, step * (hasThirdBar ? 0.2 : hasSecondBar ? 0.28 : 0.46)));
+  const barMax = niceAmountMax(chartRows.flatMap((row) => [row.bar, row.bar2, row.bar3]));
   const computedLineMax =
     lineMax ??
     nicePercentMax(chartRows.flatMap((row) => [row.primary, row.secondary]), 1);
@@ -911,6 +913,7 @@ function ComboBarLineChart({
           <div className="chart-legend">
             <span className="legend-bar">{barName}</span>
             {bar2Name ? <span className="legend-bar-2">{bar2Name}</span> : null}
+            {bar3Name ? <span className="legend-bar-3">{bar3Name}</span> : null}
             <span className="legend-primary">{primaryName}</span>
             {secondaryName ? <span className="legend-secondary">{secondaryName}</span> : null}
           </div>
@@ -946,8 +949,9 @@ function ComboBarLineChart({
           const y2 = barY(value2);
           const heightValue = plotBottom - y;
           const heightValue2 = plotBottom - y2;
-          const firstBarX = x - (hasSecondBar ? barWidth + 2 : barWidth / 2);
-          const secondBarX = x + 2;
+          const firstBarX = x - (hasThirdBar ? barWidth * 1.5 + 4 : hasSecondBar ? barWidth + 2 : barWidth / 2);
+          const secondBarX = hasThirdBar ? x - barWidth / 2 : x + 2;
+          const thirdBarX = x + barWidth / 2 + 2;
           return (
             <g key={`${row.label}-${index}`}>
               <rect
@@ -968,9 +972,19 @@ function ComboBarLineChart({
                   rx={3}
                 />
               ) : null}
+              {hasThirdBar ? (
+                <rect
+                  className="chart-bar tertiary-bar"
+                  x={thirdBarX}
+                  y={barY(row.bar3 ?? 0)}
+                  width={barWidth}
+                  height={plotBottom - barY(row.bar3 ?? 0)}
+                  rx={3}
+                />
+              ) : null}
               <text
                 className="chart-value-label bar-label"
-                x={hasSecondBar ? firstBarX + barWidth / 2 : x}
+                x={firstBarX + barWidth / 2}
                 y={Math.max(top + 14, y - 8)}
                 textAnchor="middle"
               >
@@ -979,6 +993,11 @@ function ComboBarLineChart({
               {hasSecondBar ? (
                 <text className="chart-value-label bar2-label" x={secondBarX + barWidth / 2} y={Math.max(top + 30, y2 - 8)} textAnchor="middle">
                   {row.bar2Label ?? barFormatter(row.bar2)}
+                </text>
+              ) : null}
+              {hasThirdBar ? (
+                <text className="chart-value-label bar3-label" x={thirdBarX + barWidth / 2} y={Math.max(top + 30, barY(row.bar3 ?? 0) - 8)} textAnchor="middle">
+                  {row.bar3Label ?? barFormatter(row.bar3)}
                 </text>
               ) : null}
               <text
@@ -1134,15 +1153,278 @@ function SimpleBarChart({
   );
 }
 
+type DailyTrendRow = {
+  date: string;
+  dayLabel: string;
+  gmv: number;
+  activityGmv: number;
+  organicGmv: number;
+  subsidy: number;
+};
+
+type TrendLineKey = "gmv" | "activityGmv" | "organicGmv" | "subsidy";
+
+const TREND_LINES: Array<{
+  key: TrendLineKey;
+  label: string;
+  color: string;
+  dashed?: boolean;
+}> = [
+  { key: "gmv", label: "全量GMV", color: "#2f7df0" },
+  { key: "activityGmv", label: "活动GMV", color: "#e5548a" },
+  { key: "organicGmv", label: "自然GMV", color: "#14845f" },
+  { key: "subsidy", label: "促销费", color: "#b86f17", dashed: true },
+];
+
+function DailyTrendLineChart({
+  title,
+  rows,
+  expanded = false,
+  onExpand,
+}: {
+  title: string;
+  rows: DailyTrendRow[];
+  expanded?: boolean;
+  onExpand?: () => void;
+}) {
+  const [hiddenLines, setHiddenLines] = useState<Set<TrendLineKey>>(new Set());
+  const chartRows = expanded ? rows : rows;
+  const width = expanded ? Math.max(900, chartRows.length * 72 + 116) : 720;
+  const height = expanded ? 430 : 140;
+  const left = expanded ? 68 : 52;
+  const right = expanded ? 48 : 36;
+  const top = expanded ? 50 : 20;
+  const bottom = expanded ? 96 : 42;
+  const plotWidth = width - left - right;
+  const plotHeight = height - top - bottom;
+  const plotBottom = top + plotHeight;
+  const step = plotWidth / Math.max(chartRows.length - 1, 1);
+  const xFor = (index: number) => left + step * index;
+
+  // Compute two y-axis scales: left for GMV/subsidy (money), right for none in this case
+  const allGmv = chartRows.flatMap((r) => [r.gmv, r.activityGmv, r.organicGmv]);
+  const allSubsidy = chartRows.map((r) => r.subsidy);
+  const gmvMax = niceAmountMax(allGmv);
+  const subsidyMax = niceAmountMax(allSubsidy);
+  const yMax = Math.max(gmvMax, subsidyMax);
+
+  const yFor = (value: number) => plotBottom - (Math.max(value, 0) / yMax) * plotHeight;
+
+  const getLinePoints = (key: TrendLineKey) =>
+    chartRows
+      .map((row, index) => {
+        const value = row[key];
+        return finiteNumber(value) ? `${xFor(index)},${yFor(value)}` : null;
+      })
+      .filter(Boolean)
+      .join(" ");
+
+  const toggleLine = (key: TrendLineKey) => {
+    setHiddenLines((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) {
+        next.delete(key);
+      } else {
+        next.add(key);
+      }
+      return next;
+    });
+  };
+
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLElement>) => {
+    if (!onExpand) return;
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      onExpand();
+    }
+  };
+
+  const visibleLines = TREND_LINES.filter((l) => !hiddenLines.has(l.key));
+
+  return (
+    <article
+      className={classNames(
+        "summary-chart-card",
+        "daily-trend-chart",
+        onExpand && "clickable-chart",
+        expanded && "expanded-chart",
+      )}
+      onClick={onExpand}
+      onKeyDown={handleKeyDown}
+      role={onExpand ? "button" : undefined}
+      tabIndex={onExpand ? 0 : undefined}
+    >
+      <div className="summary-chart-heading">
+        <h3>{title}</h3>
+        <div className="chart-heading-tools">
+          <div className="chart-legend trend-legend">
+            {TREND_LINES.map((line) => (
+              <span
+                key={line.key}
+                className={classNames(
+                  "legend-trend",
+                  hiddenLines.has(line.key) && "legend-trend-hidden",
+                )}
+                style={{ ["--trend-color" as string]: line.color }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  toggleLine(line.key);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    toggleLine(line.key);
+                  }
+                }}
+                role="switch"
+                aria-checked={!hiddenLines.has(line.key)}
+                tabIndex={0}
+              >
+                {line.label}
+              </span>
+            ))}
+          </div>
+          {onExpand ? <span className="chart-expand-hint">点击放大</span> : null}
+        </div>
+      </div>
+      <svg
+        className="summary-chart daily-trend-svg"
+        viewBox={`0 0 ${width} ${height}`}
+        role="img"
+        aria-label={title}
+        style={expanded ? { minWidth: width } : undefined}
+      >
+        {/* Y-axis grid and labels */}
+        {[0, 0.25, 0.5, 0.75, 1].map((ratio) => {
+          const y = plotBottom - ratio * plotHeight;
+          return (
+            <g key={ratio}>
+              <line className="chart-grid-line" x1={left} x2={width - right} y1={y} y2={y} />
+              <text className="chart-axis-label" x={left - 10} y={y + 4} textAnchor="end">
+                {formatMoney(yMax * ratio)}
+              </text>
+            </g>
+          );
+        })}
+        {/* X-axis labels */}
+        {chartRows.map((row, index) => {
+          const x = xFor(index);
+          return (
+            <text
+              key={row.date}
+              className="chart-x-label"
+              x={x}
+              y={plotBottom + 22}
+              textAnchor="middle"
+            >
+              {row.dayLabel}
+            </text>
+          );
+        })}
+        {/* Lines */}
+        {TREND_LINES.map((line) => {
+          if (hiddenLines.has(line.key)) return null;
+          const points = getLinePoints(line.key);
+          if (!points) return null;
+          return (
+            <polyline
+              key={line.key}
+              className="chart-line trend-line"
+              style={{ stroke: line.color }}
+              strokeDasharray={line.dashed ? "8 5" : undefined}
+              points={points}
+            />
+          );
+        })}
+        {/* Dots on each data point */}
+        {chartRows.map((row, index) => {
+          const x = xFor(index);
+          return (
+            <g key={`${row.date}-dots`}>
+              {TREND_LINES.map((line) => {
+                if (hiddenLines.has(line.key)) return null;
+                const value = row[line.key];
+                if (!finiteNumber(value)) return null;
+                const y = yFor(value);
+                return (
+                  <circle
+                    key={line.key}
+                    className="chart-point trend-point"
+                    cx={x}
+                    cy={y}
+                    r={expanded ? 3.5 : 2}
+                    style={{ stroke: line.color, fill: "#fff" }}
+                  />
+                );
+              })}
+            </g>
+          );
+        })}
+        {/* Data value labels on each point (visible lines only) */}
+        {chartRows.map((row, index) => {
+          const x = xFor(index);
+          return (
+            <g key={`${row.date}-labels`}>
+              {TREND_LINES.map((line) => {
+                if (hiddenLines.has(line.key)) return null;
+                const value = row[line.key];
+                if (!finiteNumber(value)) return null;
+                const y = yFor(value);
+                return (
+                  <text
+                    key={line.key}
+                    className="chart-value-label trend-point-label"
+                    x={x}
+                    y={y - (expanded ? 8 : 6)}
+                    textAnchor="middle"
+                    style={{ fill: line.color }}
+                  >
+                    {formatMoney(value)}
+                  </text>
+                );
+              })}
+            </g>
+          );
+        })}
+        {/* Value labels on last point for visible lines */}
+        {chartRows.length > 0 &&
+          visibleLines.map((line) => {
+            const lastRow = chartRows[chartRows.length - 1];
+            const value = lastRow[line.key];
+            if (!finiteNumber(value)) return null;
+            const x = xFor(chartRows.length - 1);
+            const y = yFor(value);
+            return (
+              <text
+                key={`last-${line.key}`}
+                className="chart-value-label trend-end-label"
+                x={x + (expanded ? 10 : 6)}
+                y={y + 4}
+                style={{ fill: line.color }}
+              >
+                {line.label}
+              </text>
+            );
+          })}
+      </svg>
+    </article>
+  );
+}
+
 function Panel({
   title,
   kicker,
   children,
+  collapsible = false,
 }: {
   title?: string;
   kicker?: string;
   children: React.ReactNode;
+  collapsible?: boolean;
 }) {
+  const [collapsed, setCollapsed] = useState(false);
+
   return (
     <section className="panel">
       <div className="panel-heading">
@@ -1150,8 +1432,17 @@ function Panel({
           {kicker ? <p>{kicker}</p> : null}
           {title ? <h2>{title}</h2> : null}
         </div>
+        {collapsible ? (
+          <button
+            className="panel-collapse-btn"
+            onClick={() => setCollapsed((prev) => !prev)}
+            aria-label={collapsed ? "展开" : "折叠"}
+          >
+            {collapsed ? "展开 ▾" : "折叠 ▴"}
+          </button>
+        ) : null}
       </div>
-      {children}
+      {collapsible && collapsed ? null : children}
     </section>
   );
 }
@@ -1199,7 +1490,20 @@ function collectBreakdown(
       grouped.set(name, bucket);
     });
   return Array.from(grouped.entries())
-    .map(([name, bucket]) => ({ name, ...aggregateRows(bucket) }))
+    .map(([name, bucket]) => {
+      const agg = aggregateRows(bucket);
+      // channelTargetGmv: use unique (platformId, channel) pairs to avoid double-counting
+      const seenTargets = new Set<string>();
+      const targetGmv = bucket.reduce((sum, row) => {
+        const key = `${row.platformId}|${name}`;
+        if (!seenTargets.has(key)) {
+          seenTargets.add(key);
+          return sum + ((row as any).channelTargetGmv || 0);
+        }
+        return sum;
+      }, 0);
+      return { name, ...agg, channelTargetGmv: targetGmv };
+    })
     .sort((a, b) => {
       if (key === "channel") {
         const aIndex = CHANNEL_ORDER.indexOf(a.name);
@@ -1298,6 +1602,34 @@ function topAggregateRows(rows: NamedAggregate[], limit = TOP_ROW_LIMIT): NamedA
   return [...topRows, { name: OTHER_LABEL, ...aggregateRows(restRows) }];
 }
 
+function collectAllSkuRows(
+  data: DataShape,
+  periodId: string,
+  selectedPlatforms: Set<string>,
+  selectedLeaves: Set<string>,
+  dateRange: DateRangeOption = DEFAULT_DATE_RANGE,
+) {
+  const grouped = new Map<string, MetricRow[]>();
+  (data.productRecords ?? [])
+    .filter(
+      (row) =>
+        row.periodId === periodId &&
+        selectedPlatforms.has(row.platformId) &&
+        selectedLeaves.has(row.region) &&
+        rowMatchesDateRange(data, row, dateRange),
+    )
+    .forEach((row) => {
+      const name = String(row.product ?? "未识别");
+      const bucket = grouped.get(name) ?? [];
+      bucket.push(row);
+      grouped.set(name, bucket);
+    });
+
+  return Array.from(grouped.entries())
+    .map(([name, bucket]) => ({ name, ...aggregateRows(bucket) }))
+    .sort((a, b) => b.gmv - a.gmv);
+}
+
 function aggregateActivityRows(rows: ActivitySummaryRow[], activityName = OTHER_LABEL): ActivitySummaryRow {
   const totals = rows.reduce(
     (sum, row) => ({
@@ -1347,39 +1679,6 @@ function TableNotes({ title, items }: { title: string; items: string[] }) {
     </div>
   );
 }
-
-const BUSINESS_SUMMARY_TEXT = [
-  "MTD全量GMV达成1709.7万，环比+21.1%，同比+102.7%。",
-  "GMV目标达成率51.5%，超时间进度4.8pp。",
-  "经活动促销费比环比上周下降1pp，高于目标0.5pp。",
-  "预计全月达成3800万左右，达成率104%，费比8.5%控制在目标范围内。",
-];
-
-const FOCUS_TEXT = [
-  "活动GMV占比环比上周下降8个百分点，但绝对值仍高达60.1%。",
-  "华中BU整体达成率落后时间进度5个百分点，其中非湖南地区达成率仅39%。",
-  "XJ促销预算使用进度已达104%，超支2900元，预计全月超支3w左右。",
-];
-
-const ACTION_TEXT = [
-  "熔断低效促销：停掉CIB东南&华北所有ROI<7的券（38-8、69-15、29-6），重新分配预算至59-20和79-30混补。",
-  "目前整体费用使用率超时间进度±2%左右，针对因XJ预算熔断影响的活动消耗，加持BU劵，确保销售进度。",
-];
-
-const REGION_SUMMARY_TEXT = [
-  "BU达成小结：华中湖南达成53%，非湖南达成39%，仓店达成率为39%，慢时间进度6个百分点，连锁便利店与连锁超市同比分别负增长3.5%与14.4%。整体费比同比下降2%。",
-  "行动建议：针对华中非湖南区域的超市及便利店渠道，加推“49-10”与“79-15”剔乐堡全品牌券。",
-];
-
-const CHANNEL_SUMMARY_TEXT = [
-  "重点渠道达成小结：连锁便利渠道环比上月负增长14%，同比仅增长3%，费比同比下降2%。",
-  "行动建议：针对于目前核销率最高的劵为深夜小酒馆38-8与29-6，受XJ活动熔断影响，加持49-10乌苏与1664品牌劵。",
-];
-
-const ACTIVITY_SUMMARY_TEXT = [
-  "TOP机制小结：目前，ROI低于7的活动机制已基本熔断，仅保留以下两项：小酒馆渠道的“38-8”券，以及仓店与新供给混补券“59-20”。",
-  "针对不同预算渠道及BU加持券，具体配置如下：华中地区（不含湖南）加持品牌券：49-10、79-15；CIB整剔加持品牌券：79-15；连锁便利渠道加持品牌券：39-8。",
-];
 
 function buildNarrative({
   current,
@@ -1605,8 +1904,8 @@ function buildNarrative({
           ? `区域追量：${weakDriver.node}环比变化 ${formatMoney(weakDriver.inc)}，下周目标至少补回 ${formatMoney(Math.abs(Math.min(weakDriver.inc, 0)) * 0.5 || current.gmv * 0.03)}；参考${topDriver?.node ?? "高增区域"}的高GMV渠道动作，先补货和曝光，再优化资源。`
           : `区域追量：当前区域没有可拆分弱项，目标达成率下周提升到 ${formatPercent(nextTargetAchievement)}；动作优先级为高GMV渠道加品、核心SKU补供给、预算向高ROI活动集中。`,
         fastBudgetRegion
-          ? `预算节奏：${fastBudgetRegion.node}预算使用率 ${formatPercent(fastBudgetRegion.current.promoBudgetUsage)}，目标控制在时间进度 +5pp 内；若受全国活动影响，则单独评估${fastBudgetRegion.node}高费SKU券包节奏。`
-          : `预算节奏：当前预算使用率 ${formatPercent(current.promoBudgetUsage)}，下周目标不高于时间进度 +5pp；预算只投GMV占比前3渠道和ROI达标机制。`,
+          ? `预算节奏：${fastBudgetRegion.node}预算使用率 ${formatPercent(fastBudgetRegion.current.promoBudgetUsage)}，目标控制在时间进度 +5% 内；若受全国活动影响，则单独评估${fastBudgetRegion.node}高费SKU券包节奏。`
+          : `预算节奏：当前预算使用率 ${formatPercent(current.promoBudgetUsage)}，下周目标不高于时间进度 +5%；预算只投GMV占比前3渠道和ROI达标机制。`,
         topSku
           ? `产品动作：${topSku.name}是${productLabel}第一SKU，保持主推；${highFeeSku ? `${highFeeSku.name}费比 ${formatPercent(highFeeSku.promoFeeRatio)}，若GMV占比仅 ${formatPercent(safeRatio(highFeeSku.gmv, current.gmv))} 且费比高于整体 ${formatPercent(current.promoFeeRatio)}，下周减少券包资源投入或优化。` : `下周继续补齐${productLabel} SKU 标签，保证核心单品表能追踪全部SKU。`}`
           : `产品动作：当前筛选未命中核心单品SKU，先补充 SKU 命名规则，再进入产品维度 playbook。`,
@@ -1675,12 +1974,156 @@ function buildNarrative({
   void risks;
   void actions;
 
+  // 区域小结 — 聚焦弱势区域和异常，附带行动建议
+  const regionNotes: string[] = [];
+  const weakRegions = regionDrivers
+    .filter((item) => item.node !== "总计")
+    .map((item) => ({
+      ...item,
+      inc: item.current.gmv - item.previous.gmv,
+    }))
+    .filter((item) => item.inc < 0)
+    .sort((a, b) => a.inc - b.inc);
+  const highFeeRegions = regionDrivers
+    .filter((item) => item.node !== "总计" && item.current.gmv > current.gmv * 0.01)
+    .filter((item) => (item.current.promoFeeRatio ?? 0) > (current.promoFeeRatio ?? 0) + 0.02)
+    .sort((a, b) => (b.current.promoFeeRatio ?? 0) - (a.current.promoFeeRatio ?? 0));
+
+  if (weakRegions.length > 0 || highFeeRegions.length > 0) {
+    const parts: string[] = [];
+    if (weakRegions.length > 0) {
+      const topWeak = weakRegions.slice(0, 2);
+      parts.push(
+        `弱势区域：${topWeak.map((r) => `${r.node}环比${formatDelta(r.inc)}`).join('，')}${weakRegions.length > 2 ? `等${weakRegions.length}个区域环比下滑` : ''}`,
+      );
+    }
+    if (highFeeRegions.length > 0) {
+      const topFee = highFeeRegions.slice(0, 2);
+      parts.push(
+        `高费比区域：${topFee.map((r) => `${r.node}费比${formatPercent(r.current.promoFeeRatio)}`).join('，')}${highFeeRegions.length > 2 ? `等${highFeeRegions.length}个区域费比偏高` : ''}`,
+      );
+    }
+    regionNotes.push(`异常区域：${parts.join('；')}。`);
+
+    // 行动建议
+    const targets = new Set([...weakRegions.map((r) => r.node), ...highFeeRegions.map((r) => r.node)]);
+    const targetList = Array.from(targets).slice(0, 3).join('、');
+    regionNotes.push(
+      `行动建议：针对${targetList}，优先复盘低ROI活动机制，加推品牌券补充供给，控制费比不超过${formatPercent(current.promoFeeRatio ?? 0.09)}。`,
+    );
+  } else {
+    regionNotes.push(
+      `当前范围区域表现均衡，无显著弱势或高费比异常区域。整体费比 ${formatPercent(current.promoFeeRatio)}。`,
+    );
+    regionNotes.push(
+      `行动建议：保持现有区域运营策略，重点关注${topDriver?.node ?? '高增区域'}的增量趋势。`,
+    );
+  }
+
+  // 渠道小结 — 聚焦异常渠道，附带行动建议
+  const channelNotes: string[] = [];
+  const weakChannels = channels
+    .filter((ch) => ch.gmv > current.gmv * 0.03)
+    .filter((ch) => {
+      const chWow = compareAggregate(ch, previous);
+      return chWow !== null && chWow < 0;
+    })
+    .sort((a, b) => (compareAggregate(a, previous) ?? 0) - (compareAggregate(b, previous) ?? 0));
+  const highFeeChannels = channels
+    .filter((ch) => ch.gmv > current.gmv * 0.03 && ch.promoFeeRatio !== null)
+    .filter((ch) => (ch.promoFeeRatio ?? 0) > (current.promoFeeRatio ?? 0) + 0.03)
+    .sort((a, b) => (b.promoFeeRatio ?? 0) - (a.promoFeeRatio ?? 0));
+  const highActivityChannels = channels
+    .filter((ch) => ch.gmv > current.gmv * 0.03 && ch.activityShare !== null)
+    .filter((ch) => (ch.activityShare ?? 0) > 0.7)
+    .sort((a, b) => (b.activityShare ?? 0) - (a.activityShare ?? 0));
+
+  const channelIssues: string[] = [];
+  if (weakChannels.length > 0) {
+    const topWeak = weakChannels.slice(0, 2);
+    channelIssues.push(
+      `环比下滑渠道：${topWeak.map((c) => `${c.name}环比${formatDelta(compareAggregate(c, previous))}`).join('，')}`,
+    );
+  }
+  if (highFeeChannels.length > 0) {
+    const topFee = highFeeChannels.slice(0, 2);
+    channelIssues.push(
+      `高费比渠道：${topFee.map((c) => `${c.name}费比${formatPercent(c.promoFeeRatio)}`).join('，')}`,
+    );
+  }
+  if (highActivityChannels.length > 0) {
+    const topAct = highActivityChannels.slice(0, 2);
+    channelIssues.push(
+      `高活动依赖渠道：${topAct.map((c) => `${c.name}活动GMV占比${formatPercent(c.activityShare)}`).join('，')}`,
+    );
+  }
+
+  if (channelIssues.length > 0) {
+    channelNotes.push(`异常渠道：${channelIssues.join('；')}。`);
+    const allAbnormal = new Set([
+      ...weakChannels.map((c) => c.name),
+      ...highFeeChannels.map((c) => c.name),
+      ...highActivityChannels.map((c) => c.name),
+    ]);
+    const targetList = Array.from(allAbnormal).slice(0, 3).join('、');
+    channelNotes.push(
+      `行动建议：针对${targetList}，优化高费SKU券包机制，降低活动依赖，补充品牌券和专属活动资源。`,
+    );
+  } else {
+    channelNotes.push(
+      `当前范围渠道结构均衡，无显著异常渠道。整体费比 ${formatPercent(current.promoFeeRatio)}，活动GMV占比 ${formatPercent(current.activityShare)}。`,
+    );
+    channelNotes.push(
+      `行动建议：保持${topChannel?.name ?? '重点渠道'}的资源配置，持续监控渠道费比和活动依赖度。`,
+    );
+  }
+
+  // 活动小结 — 聚焦低效活动，附带行动建议
+  const activityNotes: string[] = [];
+  const topActivity = activities[0];
+  const lowRoiActivities = activities.filter(
+    (a) => a.activityRoi !== null && a.activityRoi < 7 && a.redemptionAmount > current.subsidy * 0.01,
+  );
+  const highFeeActivities = activities.filter(
+    (a) => a.promoFeeRatio !== null && a.promoFeeRatio > (current.promoFeeRatio ?? 0) + 0.02 && a.redemptionAmount > current.subsidy * 0.01,
+  );
+
+  if (lowRoiActivities.length > 0 || highFeeActivities.length > 0) {
+    const issues: string[] = [];
+    if (lowRoiActivities.length > 0) {
+      const names = lowRoiActivities.slice(0, 3).map((a) => `"${a.activityName}"(ROI ${formatRoi(a.activityRoi)})`).join('、');
+      issues.push(`低ROI机制：${names}`);
+    }
+    if (highFeeActivities.length > 0) {
+      const names = highFeeActivities.slice(0, 2).map((a) => `"${a.activityName}"(费比${formatPercent(a.promoFeeRatio)})`).join('、');
+      issues.push(`高费比机制：${names}`);
+    }
+    activityNotes.push(`异常活动机制：${issues.join('；')}，建议复盘或优化。`);
+    activityNotes.push(
+      `行动建议：优先熔断ROI<5的机制，对ROI 5-7的机制调整券门槛或停投观察；保留ROI>7且费比可控的高效机制。`,
+    );
+  } else if (topActivity) {
+    activityNotes.push(
+      `当前活动机制整体ROI表现正常。最高核销活动为"${topActivity.activityName}"，核销金额 ${formatMoney(topActivity.redemptionAmount)}、ROI ${formatRoi(topActivity.activityRoi)}。`,
+    );
+    activityNotes.push(
+      `行动建议：保持当前活动池，持续监控ROI变化，设置观察线：ROI<7且费比高于${formatPercent((current.promoFeeRatio ?? 0.08) + 0.02)}时复盘调整。`,
+    );
+  } else {
+    activityNotes.push(
+      `当前范围暂无活动机制数据，无法生成活动小结。建议先补齐活动数据源。`,
+    );
+  }
+
   return {
-    conclusions: BUSINESS_SUMMARY_TEXT,
-    risks: FOCUS_TEXT,
-    actions: ACTION_TEXT,
+    conclusions,
+    risks,
+    actions: actions.slice(0, 3),
     analysis: analysis.map(customerizeNarrative),
     playbook: playbook.map(customerizeNarrative),
+    regionNotes,
+    channelNotes,
+    activityNotes,
     summary,
   };
 }
@@ -1976,41 +2419,23 @@ function Dashboard({ data }: { data: DataShape }) {
   );
   const coreSkuRows = useMemo(
     () =>
-      collectCoreSkuRows(
-        data,
-        period,
-        selectedPlatforms,
-        selectedLeaves,
-        effectiveProduct,
-        availableCoreProductGroups,
-        selectedDateRange,
-      ),
+      effectiveProduct === PRODUCT_ALL
+        ? collectAllSkuRows(data, period, selectedPlatforms, selectedLeaves, selectedDateRange)
+        : collectCoreSkuRows(data, period, selectedPlatforms, selectedLeaves, effectiveProduct, availableCoreProductGroups, selectedDateRange),
     [data, period, selectedPlatforms, selectedLeaves, effectiveProduct, availableCoreProductGroups, selectedDateRange],
   );
   const previousCoreSkuRows = useMemo(
     () =>
-      collectCoreSkuRows(
-        data,
-        data.metadata.previousPeriodId,
-        selectedPlatforms,
-        selectedLeaves,
-        effectiveProduct,
-        availableCoreProductGroups,
-        selectedDateRange,
-      ),
+      effectiveProduct === PRODUCT_ALL
+        ? collectAllSkuRows(data, data.metadata.previousPeriodId, selectedPlatforms, selectedLeaves, selectedDateRange)
+        : collectCoreSkuRows(data, data.metadata.previousPeriodId, selectedPlatforms, selectedLeaves, effectiveProduct, availableCoreProductGroups, selectedDateRange),
     [data, selectedPlatforms, selectedLeaves, effectiveProduct, availableCoreProductGroups, selectedDateRange],
   );
   const lastYearCoreSkuRows = useMemo(
     () =>
-      collectCoreSkuRows(
-        data,
-        data.metadata.lastYearPeriodId,
-        selectedPlatforms,
-        selectedLeaves,
-        effectiveProduct,
-        availableCoreProductGroups,
-        selectedDateRange,
-      ),
+      effectiveProduct === PRODUCT_ALL
+        ? collectAllSkuRows(data, data.metadata.lastYearPeriodId, selectedPlatforms, selectedLeaves, selectedDateRange)
+        : collectCoreSkuRows(data, data.metadata.lastYearPeriodId, selectedPlatforms, selectedLeaves, effectiveProduct, availableCoreProductGroups, selectedDateRange),
     [data, selectedPlatforms, selectedLeaves, effectiveProduct, availableCoreProductGroups, selectedDateRange],
   );
   const displayCoreSkuRows = useMemo(() => topAggregateRows(coreSkuRows), [coreSkuRows]);
@@ -2140,6 +2565,8 @@ function Dashboard({ data }: { data: DataShape }) {
             barLabel: formatMoney(row.subsidy),
             bar2: Math.max(row.promoBudgetRemaining ?? 0, 0),
             bar2Label: formatMoney(row.promoBudgetRemaining),
+            bar3: row.advertisingExposureFee ?? 0,
+            bar3Label: formatMoney(row.advertisingExposureFee),
             primary: row.promoBudgetUsage,
             primaryLabel: formatPercent(row.promoBudgetUsage, 0),
           };
@@ -2167,8 +2594,8 @@ function Dashboard({ data }: { data: DataShape }) {
             label: row.name,
             bar: row.gmv,
             barLabel: formatMoney(row.gmv),
-            primary: safeRatio(row.gmv, scopeAggregate.gmv),
-            primaryLabel: formatPercent(safeRatio(row.gmv, scopeAggregate.gmv), 0),
+            primary: safeRatio(row.gmv, (row as any).channelTargetGmv),
+            primaryLabel: formatPercent(safeRatio(row.gmv, (row as any).channelTargetGmv), 0),
             secondary: includeTargetBudget ? scopeAggregate.timeProgress : null,
             secondaryLabel: includeTargetBudget ? formatPercent(scopeAggregate.timeProgress, 0) : undefined,
           }));
@@ -2182,6 +2609,45 @@ function Dashboard({ data }: { data: DataShape }) {
       }),
     [data, period, effectiveProduct, region, scopeOptions, availableCoreProductGroups, includeTargetBudget, selectedDateRange],
   );
+
+  const dailyTrendRows = useMemo((): DailyTrendRow[] => {
+    const rawRecords = metricRowsForProduct(data, effectiveProduct);
+    const currentPeriodId = data.metadata.currentPeriodId;
+    const periodInfo = data.metadata.periods.find((p) => p.id === currentPeriodId);
+    const byDate = new Map<string, { gmv: number; activityGmv: number; subsidy: number }>();
+    rawRecords
+      .filter(
+        (row) =>
+          row.periodId === currentPeriodId &&
+          row.date &&
+          selectedPlatforms.has(row.platformId) &&
+          selectedLeaves.has(row.region) &&
+          rowMatchesDateRange(data, row, selectedDateRange) &&
+          matchesCoreProduct(row.product, effectiveProduct, availableCoreProductGroups),
+      )
+      .forEach((row) => {
+        const date = row.date!;
+        const entry = byDate.get(date) ?? { gmv: 0, activityGmv: 0, subsidy: 0 };
+        entry.gmv += row.gmv || 0;
+        entry.activityGmv += row.activityGmv || 0;
+        entry.subsidy += row.subsidy || 0;
+        byDate.set(date, entry);
+      });
+    const sortedDates = Array.from(byDate.keys()).sort();
+    return sortedDates.map((date) => {
+      const entry = byDate.get(date)!;
+      const dayNum = parseInt(date.split("-")[2], 10);
+      return {
+        date,
+        dayLabel: `${dayNum}日`,
+        gmv: entry.gmv,
+        activityGmv: entry.activityGmv,
+        organicGmv: entry.gmv - entry.activityGmv,
+        subsidy: entry.subsidy,
+      };
+    });
+  }, [data, effectiveProduct, selectedPlatforms, selectedLeaves, selectedDateRange, availableCoreProductGroups]);
+
   const selectedPlatformLabel =
     platform === PLATFORM_ALL
       ? "双平台合并"
@@ -2229,12 +2695,12 @@ function Dashboard({ data }: { data: DataShape }) {
   );
 
   const regionTableNotes = useMemo(() => {
-    return tableNotes(REGION_SUMMARY_TEXT);
-  }, []);
+    return tableNotes(narrative.regionNotes);
+  }, [narrative.regionNotes]);
 
   const channelTableNotes = useMemo(() => {
-    return tableNotes(CHANNEL_SUMMARY_TEXT);
-  }, []);
+    return tableNotes(narrative.channelNotes);
+  }, [narrative.channelNotes]);
 
   const brandTableNotes = useMemo(() => {
     const topBrand = brands[0];
@@ -2255,8 +2721,8 @@ function Dashboard({ data }: { data: DataShape }) {
   }, [brands, current.gmv]);
 
   const activityTableNotes = useMemo(() => {
-    return tableNotes(ACTIVITY_SUMMARY_TEXT);
-  }, []);
+    return tableNotes(narrative.activityNotes);
+  }, [narrative.activityNotes]);
 
   const generated = new Date(data.metadata.generatedAt).toLocaleString("zh-CN", {
     month: "2-digit",
@@ -2387,7 +2853,7 @@ function Dashboard({ data }: { data: DataShape }) {
       </section>
 
       <section className="diagnostic-section">
-        <Panel kicker="淘宝闪购 · 全国/全区域 · 6月1-14日">
+        <Panel kicker={`${selectedScopeLabel} · ${selectedRegionLabel(region)} · ${selectedDateLabel}`}>
           <div className="diagnostic-grid executive-grid">
             <article className="diagnostic-card">
               <h3>生意小结</h3>
@@ -2419,12 +2885,30 @@ function Dashboard({ data }: { data: DataShape }) {
 
       <section className="summary-section">
         <Panel title="Summary">
+          <div className="daily-trend-section">
+            <DailyTrendLineChart
+              title={`每日GMV与促销费趋势（${currentPeriod(data)?.monthLabel ?? ""}）`}
+              rows={dailyTrendRows}
+              onExpand={() =>
+                setExpandedChart({
+                  title: "每日GMV与促销费趋势",
+                  content: (
+                    <DailyTrendLineChart
+                      title={`每日GMV与促销费趋势（${currentPeriod(data)?.monthLabel ?? ""}）`}
+                      rows={dailyTrendRows}
+                      expanded
+                    />
+                  ),
+                })
+              }
+            />
+          </div>
           <div className="summary-scope-stack">
             {summaryPanels.map((scope) => {
               const regionGmvTitle = includeTargetBudget
                 ? `${scope.label}-区域GMV及达成情况`
                 : `${scope.label}-区域GMV分布`;
-              const channelTitle = `${scope.label}-渠道GMV分布`;
+              const channelTitle = `${scope.label}-渠道GMV及达成率`;
               const budgetTitle = `${scope.label}-区域预算使用情况`;
               const promoFeeTitle = `${scope.label}-区域促销费比`;
               const channelLineMax = nicePercentMax(scope.channelRows.flatMap((row) => [row.primary, row.secondary]), 0.6);
@@ -2484,7 +2968,7 @@ function Dashboard({ data }: { data: DataShape }) {
                       title={channelTitle}
                       rows={scope.channelRows}
                       barName="全量GMV"
-                      primaryName="全量GMV占比"
+                      primaryName="GMV达成率"
                       secondaryName={includeTargetBudget ? "时间进度" : undefined}
                       lineMax={channelLineMax}
                       onExpand={() =>
@@ -2495,7 +2979,7 @@ function Dashboard({ data }: { data: DataShape }) {
                               title={channelTitle}
                               rows={scope.channelRows}
                               barName="全量GMV"
-                              primaryName="全量GMV占比"
+                              primaryName="GMV达成率"
                               secondaryName={includeTargetBudget ? "时间进度" : undefined}
                               lineMax={channelLineMax}
                               expanded
@@ -2510,6 +2994,7 @@ function Dashboard({ data }: { data: DataShape }) {
                         rows={scope.budgetSummaryRows}
                         barName="已使用预算金额"
                         bar2Name="剩余预算金额"
+                        bar3Name="曝光费"
                         primaryName="促销预算使用率"
                         lineMax={1}
                         onExpand={() =>
@@ -2521,6 +3006,7 @@ function Dashboard({ data }: { data: DataShape }) {
                                 rows={scope.budgetSummaryRows}
                                 barName="已使用预算金额"
                                 bar2Name="剩余预算金额"
+                                bar3Name="曝光费"
                                 primaryName="促销预算使用率"
                                 lineMax={1}
                                 expanded
@@ -2555,13 +3041,13 @@ function Dashboard({ data }: { data: DataShape }) {
           </div>
           <p className="unit-note">
             单位说明：金额源表单位为元，页面按元/万/亿自动缩写；占比、达成率、费比、折扣率均为百分比；
-            百分比差值使用 pp，即两个百分比的直接差值；活动ROI单位为倍，核券量单位为张。
+            百分比差值使用百分点（%），即两个百分比的直接差值；活动ROI单位为倍，核券量单位为张。
           </p>
         </Panel>
       </section>
 
       <section className="table-section">
-        <Panel title="月度总览">
+        <Panel title="月度总览" collapsible>
           <div className="table-scroll">
             <table className="metric-table compact">
               <thead>
@@ -2602,7 +3088,7 @@ function Dashboard({ data }: { data: DataShape }) {
       </section>
 
       <section className="table-section">
-        <Panel title="区域表" kicker="点击区域可下钻，再次点击同一区域可返回全国/全区域">
+        <Panel title="区域表" kicker="点击区域可下钻，再次点击同一区域可返回全国/全区域" collapsible>
           <div className="table-scroll">
             <table className="metric-table region-weekly-table">
               <thead>
@@ -2669,7 +3155,7 @@ function Dashboard({ data }: { data: DataShape }) {
       </section>
 
       <section className="detail-grid">
-        <Panel title="渠道表" kicker={`MTD（${periodLabel(data, period).replace("MTD ", "")}）`}>
+        <Panel title="渠道表" kicker={`MTD（${periodLabel(data, period).replace("MTD ", "")}）`} collapsible>
           <div className="table-scroll">
             <table className="metric-table">
               <thead>
@@ -2717,7 +3203,7 @@ function Dashboard({ data }: { data: DataShape }) {
       </section>
 
       <section className="detail-grid">
-        <Panel title="TOP10零售商表" kicker={`MTD（${periodLabel(data, period).replace("MTD ", "")}）`}>
+        <Panel title="TOP10零售商表" kicker={`MTD（${periodLabel(data, period).replace("MTD ", "")}）`} collapsible>
           {merchants.length ? (
             <div className="table-scroll">
               <table className="metric-table">
@@ -2768,7 +3254,7 @@ function Dashboard({ data }: { data: DataShape }) {
       </section>
 
       <section className="detail-grid">
-        <Panel title="品牌表" kicker={`GMV表现（${periodLabel(data, period).replace("MTD ", "")}）`}>
+        <Panel title="品牌表" kicker={`GMV表现（${periodLabel(data, period).replace("MTD ", "")}）`} collapsible>
           <div className="table-scroll">
             <table className="metric-table">
               <thead>
@@ -2809,70 +3295,8 @@ function Dashboard({ data }: { data: DataShape }) {
         </Panel>
       </section>
 
-      <section className="table-section">
-        <Panel
-          title="TOP核心单品"
-          kicker={`${selectedProductLabel === "全部商品" ? "年度核心单品SKU" : selectedProductLabel} · ${periodLabel(data, period).replace("MTD ", "")}`}
-        >
-          {coreSkuRows.length ? (
-            <div className="table-scroll">
-              <table className="metric-table core-product-table">
-                <thead>
-                  <tr>
-                    <th>SKU</th>
-                    <th>全量GMV</th>
-                    <th>{colLabel("全量GMV", "占比")}</th>
-                    {includeTargetBudget ? <th>{colLabel("目标GMV", "达成率")}</th> : null}
-                    <th>{colLabel("环比", "全量GMV")}</th>
-                    <th>{colLabel("同比", "全量GMV")}</th>
-                    <th>活动GMV</th>
-                    <th>活动GMV占比</th>
-                    <th>促销费用</th>
-                    <th>促销费比</th>
-                    {includeTargetBudget ? <th>{colLabel("促销预算", "使用率")}</th> : null}
-                    <th>活动折扣率</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {displayCoreSkuRows.map((row) => {
-                    const prev =
-                      row.name === OTHER_LABEL
-                        ? findNamed(displayPreviousCoreSkuRows, row.name)
-                        : findNamed(previousCoreSkuRows, row.name);
-                    const last =
-                      row.name === OTHER_LABEL
-                        ? findNamed(displayLastYearCoreSkuRows, row.name)
-                        : findNamed(lastYearCoreSkuRows, row.name);
-                    const rowWow = prev ? compareAggregate(row, prev) : null;
-                    const rowYoy = last ? compareAggregate(row, last) : null;
-                    return (
-                      <tr className={row.name === OTHER_LABEL ? "total-row" : undefined} key={row.name}>
-                        <th>{row.name}</th>
-                        <td>{formatMoney(row.gmv)}</td>
-                        <td>{formatPercent(safeRatio(row.gmv, current.gmv))}</td>
-                        {includeTargetBudget ? <td className={targetProgressAlert(row)}>{formatPercent(row.targetAchievement)}</td> : null}
-                        <td className={trendTone(rowWow)}>{formatDelta(rowWow)}</td>
-                        <td className={trendTone(rowYoy)}>{formatDelta(rowYoy)}</td>
-                        <td>{formatMoney(row.activityGmv)}</td>
-                        <td className={activityShareAlert(row.activityShare)}>{formatPercent(row.activityShare)}</td>
-                        <td>{formatMoney(row.subsidy)}</td>
-                        <td className={promoFeeAlert(row)}>{formatPercent(row.promoFeeRatio)}</td>
-                        {includeTargetBudget ? <td className={budgetProgressAlert(row)}>{formatPercent(row.promoBudgetUsage)}</td> : null}
-                        <td>{formatPercent(row.activityDiscount)}</td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          ) : (
-            <div className="empty-state">当前筛选范围内没有命中的核心单品 SKU。</div>
-          )}
-        </Panel>
-      </section>
-
       <section className="detail-grid">
-        <Panel title="TOP10活动" kicker={`MTD（${periodLabel(data, period).replace("MTD ", "")}）`}>
+        <Panel title="TOP10活动" kicker={`MTD（${periodLabel(data, period).replace("MTD ", "")}）`} collapsible>
           <div className="table-scroll">
             <table className="metric-table">
               <thead>

@@ -399,6 +399,30 @@ select {
   grid-row: span 2;
 }
 
+.taobao-extra-modules {
+  grid-template-columns: 1fr;
+}
+
+.taobao-extra-modules .panel {
+  box-shadow: 0 10px 26px rgba(24, 83, 74, 0.05);
+}
+
+.text-module-body {
+  display: grid;
+  gap: 8px;
+  border-left: 3px solid var(--green);
+  border-radius: 6px;
+  background: var(--surface-soft);
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1.68;
+  padding: 12px 14px;
+}
+
+.text-module-body p {
+  margin: 0;
+}
+
 .panel-heading {
   display: flex;
   align-items: flex-start;
@@ -1358,6 +1382,10 @@ select {
   .panel.wide {
     grid-column: 1 / -1;
     grid-row: auto;
+  }
+
+  .taobao-extra-modules {
+    grid-template-columns: 1fr;
   }
 }
 

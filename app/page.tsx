@@ -669,6 +669,68 @@ function normalizeChannelDisplayName(value: unknown): string {
   return name;
 }
 
+const TAOBAO_ANALYSIS_OVERRIDE = {
+  conclusions: [
+    "淘宝闪购 · 全国/全区域目标分析周期全量GMV 2595.0万，环比+21.2%，同比+102.3%。",
+    "GMV目标达成率 78.1%，时间进度 70.0%，领先时间进度 8.1%。",
+    "实际促销费比 8.5%，低于目标 0.6%；活动GMV占比 57.8%，活动依赖相对可控。",
+    "预计全月达成 3800万左右，达成率104%，费比8.5%控制在目标范围内。",
+  ],
+  risks: [
+    "活动GMV同比增长94.5%，当前绝对值仍为57.8%，需继续关注自然GMV承接能力。",
+    "华中BU整体达成率63.4%，落后时间进度6.6%，其中非湖南地区达成率仅59%。",
+    "整体促销预算使用率 67.2%，慢于时间进度 2.8%；CBC预算使用率 77% 是重点观察对象。",
+  ],
+  actions: [
+    "稳费比：费比未高于目标，保留当前机制，同时品牌券与混补券已剔除CBC覆盖；下周继续盯预算使用率控制在时间进度内。",
+    "促增长：仓店目前达成率超时间进度1个点左右，由于CBC、XJ等BU的活动熔断与剔品，目标达成会有一定风险，需加持该渠道39-10品牌券，剔除XJ与CBC。",
+    "调机制：目前仅保留小酒馆38-8与69-15及混补活动机制，由于世界杯新增39-10与59-15会造成预算一定失控，建议先剔除CBC。",
+    "追赶目标：由于华中非湖南当前达成缺口较大，预算充足，建议加持券49-10改成39-10品牌券。",
+  ],
+  regionNotes: [
+    "华中湖南达成63%，非湖南达成59%，落后时间11个百分点，仓店达成率为57.4%，慢时间进度12个百分点，连锁超市环比从负增长14%追赶到负9%。",
+    "行动建议：针对华中非湖南区域的连锁超市及仓店渠道，加推“39-10”与“79-20”剔乐堡全品牌券。",
+  ],
+  channelNotes: [
+    "整体都达到时间进度，连锁便利渠道加持39-8的品牌券后，从上周环比-14%，已追赶到-9%。",
+  ],
+  activityNotes: [
+    "目前，ROI低于7的活动机制已基本熔断，针对不同预算渠道及BU加持券，具体配置如下：华中地区（不含湖南）调整加持品牌券：39-10、79-20。",
+    "CBC：目前已熔断品牌券，考虑世界杯59-15是否覆盖。",
+  ],
+};
+
+const TAOBAO_EXTRA_TEXT_MODULES = [
+  {
+    title: "淘宝闪购仓店销售达成小结",
+    paragraphs: [
+      "6月累计销售额1046万元，超时间进度0.5个百分点，预计全月可达1515万元，目标达成率101%。",
+      "整体费比7.3%，超出目标1.6个百分点。",
+      "CIB达成67.3%，华中57.4%，XJ61.6%，未达时间进度。加持39-10仓店全渠道，剔除CBC与XJ，以确保销售达成。",
+    ],
+  },
+  {
+    title: "淘宝闪购竞品运营动作（南宁&西安）",
+    paragraphs: [
+      "百威：仅在西安加持了49-10品牌券，最低折扣8折。",
+      "雪花：在南宁&西安加持了49-10品牌券、49-15混补等券，最低折扣6折。",
+      "青岛：仅在西安加持了69-25、99-20品牌券，最低折扣5.3折。",
+    ],
+  },
+  {
+    title: "淘宝闪购官旗本周生意总结",
+    paragraphs: [
+      "本周费比比上周跌0.3%，销售环比增长25.8%，同比下滑4%。",
+      "特醇活动机制恢复后，产品竞争力显著提升，直接带动酒小二P2（下单转化率）由上周的30.6提升至本周的35.4%。",
+      "云南区域乐堡系列百亿补贴恢复后，GMV环比增长103.4%，说明活动对生意的影响仍较大。",
+      "分账模式下，惠宜选曝光环比涨5.3%，GMV反而跌21.8%，核心原因是商品竞争力不足，导致流量无法转化。",
+      "下一步行动建议：5月返货金18号已到账，因7月无返货金加持，需提前调整全站推费比以储备预算。酒小二TOP500门店费比由目前20%调整为12%，中尾部1000家门店费比由15%调整至8%，保证基本盘的同时为7月蓄能。",
+      "爆好价：大理V8整件43元、特醇500ml整件71.6元，平台侧已推送，目前正沟通酒小二推动商户报名，争取站内曝光资源。",
+      "分账模式下，针对惠宜选TOP3单品：红乌苏500ml、乐堡495ml、特醇500ml，通过打造“底价引流单品”，拉升转化率，解决流量浪费问题。",
+    ],
+  },
+];
+
 function isOneLiterProduct(product: string): boolean {
   if (product === PRODUCT_ALL) return false;
   const normalized = product.replace(/\s+/g, "");
@@ -1475,6 +1537,18 @@ function Panel({
   );
 }
 
+function TextModule({ title, paragraphs }: { title: string; paragraphs: string[] }) {
+  return (
+    <Panel title={title} collapsible>
+      <div className="text-module-body">
+        {paragraphs.map((paragraph) => (
+          <p key={paragraph}>{paragraph}</p>
+        ))}
+      </div>
+    </Panel>
+  );
+}
+
 function compareAggregate(current: Aggregate, baseline: Aggregate): number | null {
   return safeRatio(current.gmv - baseline.gmv, baseline.gmv);
 }
@@ -1958,25 +2032,14 @@ function buildNarrative({
 
   const huazhongRegion = regionDrivers.find((item) => item.node === "华中");
   const huazhongNonHunanRegion = regionDrivers.find((item) => item.node === "华中-非湖南");
-  const xjRegion = regionDrivers.find((item) => item.node === "XJ");
   const activityShareDelta = current.activityShare !== null && previous.activityShare !== null
     ? current.activityShare - previous.activityShare
     : null;
-  const xjBudgetOver = xjRegion?.current.promoBudgetRemaining !== null && xjRegion?.current.promoBudgetRemaining !== undefined
-    ? Math.max(0, -xjRegion.current.promoBudgetRemaining)
-    : 0;
-  const xjProjectedOver =
-    xjRegion?.current.timeProgress && xjRegion.current.promoBudgetUsage !== null && xjRegion.current.budget
-      ? Math.max(0, xjRegion.current.budget * (xjRegion.current.promoBudgetUsage / xjRegion.current.timeProgress - 1))
-      : 0;
   const risks = [
     `活动GMV占比环比${activityShareDelta !== null && activityShareDelta < 0 ? "下降" : "上升"}${formatPointDistance(activityShareDelta)}，当前绝对值仍为${formatPercent(current.activityShare)}，需继续关注自然GMV承接能力。`,
     huazhongRegion
       ? `华中BU整体达成率${formatPercent(huazhongRegion.current.targetAchievement)}，${huazhongRegion.current.targetAchievement !== null && huazhongRegion.current.timeProgress !== null ? `${huazhongRegion.current.targetAchievement >= huazhongRegion.current.timeProgress ? "领先" : "落后"}时间进度${formatPointDistance((huazhongRegion.current.targetAchievement ?? 0) - (huazhongRegion.current.timeProgress ?? 0))}` : "时间进度暂缺"}${huazhongNonHunanRegion ? `，其中非湖南地区达成率仅${formatPercent(huazhongNonHunanRegion.current.targetAchievement, 0)}` : ""}。`
       : `华中BU本周目标达成率暂无法拆解，需优先核对区域目标与GMV数据。`,
-    xjRegion
-      ? `XJ促销预算使用进度已达${formatPercent(xjRegion.current.promoBudgetUsage, 0)}，当前超支${formatMoney(xjBudgetOver)}，按当前节奏预计全月超支${formatMoney(xjProjectedOver)}左右。`
-      : `XJ预算使用进度暂无法拆解，需优先核对区域预算与促销费数据。`,
   ];
 
   const summary = [
@@ -2796,18 +2859,30 @@ function Dashboard({ data }: { data: DataShape }) {
       includeTargetBudget,
     ],
   );
+  const displayNarrative =
+    platform === "taobao"
+      ? {
+          ...narrative,
+          conclusions: TAOBAO_ANALYSIS_OVERRIDE.conclusions,
+          risks: TAOBAO_ANALYSIS_OVERRIDE.risks,
+          actions: TAOBAO_ANALYSIS_OVERRIDE.actions,
+          regionNotes: TAOBAO_ANALYSIS_OVERRIDE.regionNotes,
+          channelNotes: TAOBAO_ANALYSIS_OVERRIDE.channelNotes,
+          activityNotes: TAOBAO_ANALYSIS_OVERRIDE.activityNotes,
+        }
+      : narrative;
 
   const regionTableNotes = useMemo(() => {
-    return tableNotes(narrative.regionNotes);
-  }, [narrative.regionNotes]);
+    return tableNotes(displayNarrative.regionNotes);
+  }, [displayNarrative.regionNotes]);
 
   const channelTableNotes = useMemo(() => {
-    return tableNotes(narrative.channelNotes);
-  }, [narrative.channelNotes]);
+    return tableNotes(displayNarrative.channelNotes);
+  }, [displayNarrative.channelNotes]);
 
   const activityTableNotes = useMemo(() => {
-    return tableNotes(narrative.activityNotes);
-  }, [narrative.activityNotes]);
+    return tableNotes(displayNarrative.activityNotes);
+  }, [displayNarrative.activityNotes]);
 
   const generated = new Date(data.metadata.generatedAt).toLocaleString("zh-CN", {
     month: "2-digit",
@@ -2943,7 +3018,7 @@ function Dashboard({ data }: { data: DataShape }) {
             <article className="diagnostic-card">
               <h3>生意小结</h3>
               <ul className="narrative-list">
-                {narrative.conclusions.map((item) => (
+                {displayNarrative.conclusions.map((item) => (
                   <li key={item}>{item}</li>
                 ))}
               </ul>
@@ -2951,7 +3026,7 @@ function Dashboard({ data }: { data: DataShape }) {
             <article className="diagnostic-card">
               <h3>重点关注</h3>
               <ol className="narrative-list ordered">
-                {narrative.risks.map((item) => (
+                {displayNarrative.risks.map((item) => (
                   <li key={item}>{item}</li>
                 ))}
               </ol>
@@ -2959,7 +3034,7 @@ function Dashboard({ data }: { data: DataShape }) {
             <article className="diagnostic-card">
               <h3>行动建议</h3>
               <ol className="narrative-list ordered">
-                {narrative.actions.map((item) => (
+                {displayNarrative.actions.map((item) => (
                   <li key={item}>{item}</li>
                 ))}
               </ol>
@@ -3346,7 +3421,8 @@ function Dashboard({ data }: { data: DataShape }) {
                 <tr>
                   <th>品牌</th>
                   <th>全量GMV</th>
-                  <th>费比</th>
+                  <th>促销费比</th>
+                  <th>促销费用</th>
                   <th>{colLabel("环比", "全量GMV")}</th>
                   <th>{colLabel("同比", "全量GMV")}</th>
                   <th>{colLabel("全量GMV", "占比")}</th>
@@ -3364,6 +3440,7 @@ function Dashboard({ data }: { data: DataShape }) {
                       <th>{row.name}</th>
                       <td>{formatMoney(row.gmv)}</td>
                       <td className={promoFeeAlert(row)}>{formatPercent(row.promoFeeRatio)}</td>
+                      <td>{formatMoney(row.subsidy)}</td>
                       <td className={trendTone(prev ? compareAggregate(row, prev) : null)}>{formatDelta(prev ? compareAggregate(row, prev) : null)}</td>
                       <td className={trendTone(last ? compareAggregate(row, last) : null)}>{formatDelta(last ? compareAggregate(row, last) : null)}</td>
                       <td>{formatPercent(safeRatio(row.gmv, current.gmv))}</td>
@@ -3377,7 +3454,7 @@ function Dashboard({ data }: { data: DataShape }) {
             </table>
           </div>
           <div className="table-subsection">
-            <h3>TOP商品表</h3>
+            <h3>TOP10商品表</h3>
           </div>
           <div className="table-scroll">
             <table className="metric-table product-top-table">
@@ -3385,7 +3462,8 @@ function Dashboard({ data }: { data: DataShape }) {
                 <tr>
                   <th>商品</th>
                   <th>全量GMV</th>
-                  <th>费比</th>
+                  <th>促销费比</th>
+                  <th>促销费用</th>
                   <th>{colLabel("环比", "全量GMV")}</th>
                   <th>{colLabel("同比", "全量GMV")}</th>
                   <th>{colLabel("全量GMV", "占比")}</th>
@@ -3403,6 +3481,7 @@ function Dashboard({ data }: { data: DataShape }) {
                       <th>{row.name}</th>
                       <td>{formatMoney(row.gmv)}</td>
                       <td className={promoFeeAlert(row)}>{formatPercent(row.promoFeeRatio)}</td>
+                      <td>{formatMoney(row.subsidy)}</td>
                       <td className={trendTone(prev ? compareAggregate(row, prev) : null)}>{formatDelta(prev ? compareAggregate(row, prev) : null)}</td>
                       <td className={trendTone(last ? compareAggregate(row, last) : null)}>{formatDelta(last ? compareAggregate(row, last) : null)}</td>
                       <td>{formatPercent(safeRatio(row.gmv, current.gmv))}</td>
@@ -3461,6 +3540,14 @@ function Dashboard({ data }: { data: DataShape }) {
           <TableNotes title={`${noteScopeLabel}BY活动小结`} items={activityTableNotes} />
         </Panel>
       </section>
+
+      {platform === "taobao" ? (
+        <section className="detail-grid taobao-extra-modules">
+          {TAOBAO_EXTRA_TEXT_MODULES.map((module) => (
+            <TextModule key={module.title} title={module.title} paragraphs={module.paragraphs} />
+          ))}
+        </section>
+      ) : null}
 
       {expandedChart ? (
         <div className="chart-modal-backdrop" onClick={() => setExpandedChart(null)}>
